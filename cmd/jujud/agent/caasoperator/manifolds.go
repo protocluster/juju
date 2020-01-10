@@ -30,6 +30,7 @@ import (
 	"github.com/juju/juju/worker/apiaddressupdater"
 	"github.com/juju/juju/worker/apicaller"
 	"github.com/juju/juju/worker/apiconfigwatcher"
+	"github.com/juju/juju/worker/caasadmission"
 	"github.com/juju/juju/worker/caasoperator"
 	"github.com/juju/juju/worker/caasunitinit"
 	"github.com/juju/juju/worker/caasupgrader"
@@ -147,6 +148,10 @@ func Manifolds(config ManifoldsConfig) dependency.Manifolds {
 		logSenderName: logsender.Manifold(logsender.ManifoldConfig{
 			APICallerName: apiCallerName,
 			LogSource:     config.LogSource,
+		}),
+
+		caasAdmissionName: caasadmission.Manifold(caasadmission.ManifoldConfig{
+			Logger: loggo.GetLogger("juju.worker.caasadmission"),
 		}),
 
 		// The upgrade steps gate is used to coordinate workers which
@@ -330,6 +335,8 @@ const (
 	operatorName         = "operator"
 	logSenderName        = "log-sender"
 	unitInitWorkerName   = "unit-init-worker"
+
+	caasAdmissionName = "caas-admission"
 
 	charmDirName          = "charm-dir"
 	hookRetryStrategyName = "hook-retry-strategy"
