@@ -73,7 +73,8 @@ def get_bootstrap_config_path(juju_data_dir):
 
 def get_environments():
     """Return the environments for juju."""
-    home = get_juju_home()
+    # home = get_juju_home()
+    home = "/home/nam/.local/share/juju"
     with open(get_environments_path(home)) as env:
         return yaml.safe_load(env)['environments']
 
