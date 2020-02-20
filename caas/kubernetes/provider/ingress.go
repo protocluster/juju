@@ -17,7 +17,7 @@ import (
 	k8sannotations "github.com/juju/juju/core/annotations"
 )
 
-func (k *kubernetesClient) getIngressLabels(appName string) map[string]string {
+func (k *KubernetesClient) getIngressLabels(appName string) map[string]string {
 	return map[string]string{
 		labelApplication: appName,
 	}
@@ -25,7 +25,7 @@ func (k *kubernetesClient) getIngressLabels(appName string) map[string]string {
 
 // TODO(caas): should we overwrite the existing `juju expose` created ingress if user runs upgrade-charm with new ingress podspec v2.
 // https://bugs.launchpad.net/juju/+bug/1854123
-func (k *kubernetesClient) ensureIngressResources(
+func (k *KubernetesClient) ensureIngressResources(
 	appName string, annotations k8sannotations.Annotation, ingSpecs []k8sspecs.K8sIngressSpec,
 ) (cleanUps []func(), err error) {
 	for _, v := range ingSpecs {
@@ -46,7 +46,7 @@ func (k *kubernetesClient) ensureIngressResources(
 	return cleanUps, nil
 }
 
-func (k *kubernetesClient) ensureIngress(appName string, spec *v1beta1.Ingress, force bool) (func(), error) {
+func (k *KubernetesClient) ensureIngress(appName string, spec *v1beta1.Ingress, force bool) (func(), error) {
 	cleanUp := func() {}
 	out, err := k.createIngress(spec)
 	if err == nil {
@@ -69,7 +69,7 @@ func (k *kubernetesClient) ensureIngress(appName string, spec *v1beta1.Ingress, 
 	return cleanUp, errors.Trace(err)
 }
 
-func (k *kubernetesClient) createIngress(ingress *v1beta1.Ingress) (*v1beta1.Ingress, error) {
+func (k *KubernetesClient) createIngress(ingress *v1beta1.Ingress) (*v1beta1.Ingress, error) {
 	purifyResource(ingress)
 	out, err := k.client().ExtensionsV1beta1().Ingresses(k.namespace).Create(ingress)
 	if k8serrors.IsAlreadyExists(err) {
@@ -78,7 +78,7 @@ func (k *kubernetesClient) createIngress(ingress *v1beta1.Ingress) (*v1beta1.Ing
 	return out, errors.Trace(err)
 }
 
-func (k *kubernetesClient) getIngress(name string) (*v1beta1.Ingress, error) {
+func (k *KubernetesClient) getIngress(name string) (*v1beta1.Ingress, error) {
 	out, err := k.client().ExtensionsV1beta1().Ingresses(k.namespace).Get(name, v1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
 		return nil, errors.NotFoundf("ingress resource %q", name)
@@ -86,7 +86,7 @@ func (k *kubernetesClient) getIngress(name string) (*v1beta1.Ingress, error) {
 	return out, errors.Trace(err)
 }
 
-func (k *kubernetesClient) updateIngress(ingress *v1beta1.Ingress) (*v1beta1.Ingress, error) {
+func (k *KubernetesClient) updateIngress(ingress *v1beta1.Ingress) (*v1beta1.Ingress, error) {
 	out, err := k.client().ExtensionsV1beta1().Ingresses(k.namespace).Update(ingress)
 	if k8serrors.IsNotFound(err) {
 		return nil, errors.NotFoundf("ingress resource %q", ingress.GetName())
@@ -94,7 +94,7 @@ func (k *kubernetesClient) updateIngress(ingress *v1beta1.Ingress) (*v1beta1.Ing
 	return out, errors.Trace(err)
 }
 
-func (k *kubernetesClient) deleteIngress(name string, uid k8stypes.UID) error {
+func (k *KubernetesClient) deleteIngress(name string, uid k8stypes.UID) error {
 	err := k.client().ExtensionsV1beta1().Ingresses(k.namespace).Delete(name, newPreconditionDeleteOptions(uid))
 	if k8serrors.IsNotFound(err) {
 		return nil
@@ -102,7 +102,7 @@ func (k *kubernetesClient) deleteIngress(name string, uid k8stypes.UID) error {
 	return errors.Trace(err)
 }
 
-func (k *kubernetesClient) listIngressResources(labels map[string]string) ([]v1beta1.Ingress, error) {
+func (k *KubernetesClient) listIngressResources(labels map[string]string) ([]v1beta1.Ingress, error) {
 	listOps := v1.ListOptions{
 		LabelSelector: labelsToSelector(labels),
 	}
@@ -116,7 +116,7 @@ func (k *kubernetesClient) listIngressResources(labels map[string]string) ([]v1b
 	return ingList.Items, nil
 }
 
-func (k *kubernetesClient) deleteIngressResources(appName string) error {
+func (k *KubernetesClient) deleteIngressResources(appName string) error {
 	err := k.client().ExtensionsV1beta1().Ingresses(k.namespace).DeleteCollection(&v1.DeleteOptions{
 		PropagationPolicy: &defaultPropagationPolicy,
 	}, v1.ListOptions{

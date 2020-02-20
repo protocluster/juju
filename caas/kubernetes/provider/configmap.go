@@ -13,13 +13,13 @@ import (
 	"github.com/juju/juju/caas/specs"
 )
 
-func (k *kubernetesClient) getConfigMapLabels(appName string) map[string]string {
+func (k *KubernetesClient) getConfigMapLabels(appName string) map[string]string {
 	return map[string]string{
 		labelApplication: appName,
 	}
 }
 
-func (k *kubernetesClient) ensureConfigMaps(
+func (k *KubernetesClient) ensureConfigMaps(
 	appName string,
 	annotations map[string]string,
 	cms map[string]specs.ConfigMap,
@@ -45,7 +45,7 @@ func (k *kubernetesClient) ensureConfigMaps(
 
 // ensureConfigMapLegacy is a tmp fix for upgrading configmap(no proper labels) created in 2.6.
 // TODO(caas): remove this and use "updateConfigMap" once `modelupgrader` supports CaaS models.
-func (k *kubernetesClient) ensureConfigMapLegacy(cm *core.ConfigMap) (cleanUp func(), err error) {
+func (k *KubernetesClient) ensureConfigMapLegacy(cm *core.ConfigMap) (cleanUp func(), err error) {
 	cleanUp = func() {}
 	api := k.client().CoreV1().ConfigMaps(k.namespace)
 	_, err = api.Update(cm)
@@ -61,7 +61,7 @@ func (k *kubernetesClient) ensureConfigMapLegacy(cm *core.ConfigMap) (cleanUp fu
 }
 
 // ensureConfigMap ensures a ConfigMap resource.
-func (k *kubernetesClient) ensureConfigMap(cm *core.ConfigMap) (func(), error) {
+func (k *KubernetesClient) ensureConfigMap(cm *core.ConfigMap) (func(), error) {
 	cleanUp := func() {}
 	out, err := k.createConfigMap(cm)
 	if err == nil {
@@ -85,7 +85,7 @@ func (k *kubernetesClient) ensureConfigMap(cm *core.ConfigMap) (func(), error) {
 	return cleanUp, errors.Trace(err)
 }
 
-func (k *kubernetesClient) updateConfigMap(cm *core.ConfigMap) error {
+func (k *KubernetesClient) updateConfigMap(cm *core.ConfigMap) error {
 	_, err := k.client().CoreV1().ConfigMaps(k.namespace).Update(cm)
 	if k8serrors.IsNotFound(err) {
 		return errors.NotFoundf("configmap %q", cm.GetName())
@@ -94,7 +94,7 @@ func (k *kubernetesClient) updateConfigMap(cm *core.ConfigMap) error {
 }
 
 // getConfigMap returns a ConfigMap resource.
-func (k *kubernetesClient) getConfigMap(name string) (*core.ConfigMap, error) {
+func (k *KubernetesClient) getConfigMap(name string) (*core.ConfigMap, error) {
 	cm, err := k.client().CoreV1().ConfigMaps(k.namespace).Get(name, v1.GetOptions{})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
@@ -106,7 +106,7 @@ func (k *kubernetesClient) getConfigMap(name string) (*core.ConfigMap, error) {
 }
 
 // createConfigMap creates a ConfigMap resource.
-func (k *kubernetesClient) createConfigMap(cm *core.ConfigMap) (*core.ConfigMap, error) {
+func (k *KubernetesClient) createConfigMap(cm *core.ConfigMap) (*core.ConfigMap, error) {
 	purifyResource(cm)
 	out, err := k.client().CoreV1().ConfigMaps(k.namespace).Create(cm)
 	if k8serrors.IsAlreadyExists(err) {
@@ -116,7 +116,7 @@ func (k *kubernetesClient) createConfigMap(cm *core.ConfigMap) (*core.ConfigMap,
 }
 
 // deleteConfigMap deletes a ConfigMap resource.
-func (k *kubernetesClient) deleteConfigMap(name string, uid types.UID) error {
+func (k *KubernetesClient) deleteConfigMap(name string, uid types.UID) error {
 	err := k.client().CoreV1().ConfigMaps(k.namespace).Delete(name, newPreconditionDeleteOptions(uid))
 	if k8serrors.IsNotFound(err) {
 		return nil
@@ -124,7 +124,7 @@ func (k *kubernetesClient) deleteConfigMap(name string, uid types.UID) error {
 	return errors.Trace(err)
 }
 
-func (k *kubernetesClient) listConfigMaps(labels map[string]string) ([]core.ConfigMap, error) {
+func (k *KubernetesClient) listConfigMaps(labels map[string]string) ([]core.ConfigMap, error) {
 	listOps := v1.ListOptions{
 		LabelSelector: labelsToSelector(labels),
 	}
@@ -138,7 +138,7 @@ func (k *kubernetesClient) listConfigMaps(labels map[string]string) ([]core.Conf
 	return cmList.Items, nil
 }
 
-func (k *kubernetesClient) deleteConfigMaps(appName string) error {
+func (k *KubernetesClient) deleteConfigMaps(appName string) error {
 	err := k.client().CoreV1().ConfigMaps(k.namespace).DeleteCollection(&v1.DeleteOptions{
 		PropagationPolicy: &defaultPropagationPolicy,
 	}, v1.ListOptions{

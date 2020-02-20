@@ -11,13 +11,13 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-func (k *kubernetesClient) getDaemonSetLabels(appName string) map[string]string {
+func (k *KubernetesClient) getDaemonSetLabels(appName string) map[string]string {
 	return map[string]string{
 		labelApplication: appName,
 	}
 }
 
-func (k *kubernetesClient) ensureDaemonSet(spec *apps.DaemonSet) (func(), error) {
+func (k *KubernetesClient) ensureDaemonSet(spec *apps.DaemonSet) (func(), error) {
 	cleanUp := func() {}
 	out, err := k.createDaemonSet(spec)
 	if err == nil {
@@ -41,7 +41,7 @@ func (k *kubernetesClient) ensureDaemonSet(spec *apps.DaemonSet) (func(), error)
 	return cleanUp, errors.Trace(err)
 }
 
-func (k *kubernetesClient) createDaemonSet(spec *apps.DaemonSet) (*apps.DaemonSet, error) {
+func (k *KubernetesClient) createDaemonSet(spec *apps.DaemonSet) (*apps.DaemonSet, error) {
 	purifyResource(spec)
 	out, err := k.client().AppsV1().DaemonSets(k.namespace).Create(spec)
 	if k8serrors.IsAlreadyExists(err) {
@@ -50,7 +50,7 @@ func (k *kubernetesClient) createDaemonSet(spec *apps.DaemonSet) (*apps.DaemonSe
 	return out, errors.Trace(err)
 }
 
-func (k *kubernetesClient) getDaemonSet(name string) (*apps.DaemonSet, error) {
+func (k *KubernetesClient) getDaemonSet(name string) (*apps.DaemonSet, error) {
 	out, err := k.client().AppsV1().DaemonSets(k.namespace).Get(name, v1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
 		return nil, errors.NotFoundf("daemon set %q", name)
@@ -58,7 +58,7 @@ func (k *kubernetesClient) getDaemonSet(name string) (*apps.DaemonSet, error) {
 	return out, errors.Trace(err)
 }
 
-func (k *kubernetesClient) updateDaemonSet(spec *apps.DaemonSet) (*apps.DaemonSet, error) {
+func (k *KubernetesClient) updateDaemonSet(spec *apps.DaemonSet) (*apps.DaemonSet, error) {
 	out, err := k.client().AppsV1().DaemonSets(k.namespace).Update(spec)
 	if k8serrors.IsNotFound(err) {
 		return nil, errors.NotFoundf("daemon set %q", spec.GetName())
@@ -66,7 +66,7 @@ func (k *kubernetesClient) updateDaemonSet(spec *apps.DaemonSet) (*apps.DaemonSe
 	return out, errors.Trace(err)
 }
 
-func (k *kubernetesClient) deleteDaemonSet(name string, uid types.UID) error {
+func (k *KubernetesClient) deleteDaemonSet(name string, uid types.UID) error {
 	err := k.client().AppsV1().DaemonSets(k.namespace).Delete(name, newPreconditionDeleteOptions(uid))
 	if k8serrors.IsNotFound(err) {
 		return nil
@@ -74,7 +74,7 @@ func (k *kubernetesClient) deleteDaemonSet(name string, uid types.UID) error {
 	return errors.Trace(err)
 }
 
-func (k *kubernetesClient) listDaemonSets(labels map[string]string) ([]apps.DaemonSet, error) {
+func (k *KubernetesClient) listDaemonSets(labels map[string]string) ([]apps.DaemonSet, error) {
 	listOps := v1.ListOptions{
 		LabelSelector: labelsToSelector(labels),
 	}
@@ -88,7 +88,7 @@ func (k *kubernetesClient) listDaemonSets(labels map[string]string) ([]apps.Daem
 	return out.Items, nil
 }
 
-func (k *kubernetesClient) deleteDaemonSets(appName string) error {
+func (k *KubernetesClient) deleteDaemonSets(appName string) error {
 	err := k.client().AppsV1().DaemonSets(k.namespace).DeleteCollection(&v1.DeleteOptions{
 		PropagationPolicy: &defaultPropagationPolicy,
 	}, v1.ListOptions{

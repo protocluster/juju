@@ -32,7 +32,7 @@ func operatorLabels(appName string) map[string]string {
 	return map[string]string{labelOperator: appName}
 }
 
-func (k *kubernetesClient) deleteOperatorRBACResources(appName string) error {
+func (k *KubernetesClient) deleteOperatorRBACResources(appName string) error {
 	labels := operatorLabels(appName)
 	if err := k.deleteRoleBindings(labels); err != nil {
 		return errors.Trace(err)
@@ -46,7 +46,7 @@ func (k *kubernetesClient) deleteOperatorRBACResources(appName string) error {
 	return nil
 }
 
-func (k *kubernetesClient) ensureOperatorRBACResources(operatorName string, labels, annotations map[string]string) (sa *core.ServiceAccount, cleanUps []func(), err error) {
+func (k *KubernetesClient) ensureOperatorRBACResources(operatorName string, labels, annotations map[string]string) (sa *core.ServiceAccount, cleanUps []func(), err error) {
 	defer func() {
 		// ensure cleanup in reversed order.
 		i := 0
@@ -133,7 +133,7 @@ func (k *kubernetesClient) ensureOperatorRBACResources(operatorName string, labe
 
 // EnsureOperator creates or updates an operator pod with the given application
 // name, agent path, and operator config.
-func (k *kubernetesClient) EnsureOperator(appName, agentPath string, config *caas.OperatorConfig) (err error) {
+func (k *KubernetesClient) EnsureOperator(appName, agentPath string, config *caas.OperatorConfig) (err error) {
 	logger.Debugf("creating/updating %s operator", appName)
 
 	operatorName := k.operatorName(appName)
@@ -283,7 +283,7 @@ func (k *kubernetesClient) EnsureOperator(appName, agentPath string, config *caa
 	return errors.Annotatef(err, "creating or updating %v operator StatefulSet", appName)
 }
 
-func (k *kubernetesClient) validateOperatorStorage() (string, error) {
+func (k *KubernetesClient) validateOperatorStorage() (string, error) {
 	storageClass, _ := k.Config().AllAttrs()[OperatorStorageKey].(string)
 	if storageClass == "" {
 		return "", errors.NewNotValid(nil, "config without operator-storage value not valid.\nRun juju add-k8s to reimport your k8s cluster.")
@@ -294,7 +294,7 @@ func (k *kubernetesClient) validateOperatorStorage() (string, error) {
 
 // OperatorExists indicates if the operator for the specified
 // application exists, and whether the operator is terminating.
-func (k *kubernetesClient) OperatorExists(appName string) (caas.OperatorState, error) {
+func (k *KubernetesClient) OperatorExists(appName string) (caas.OperatorState, error) {
 	var result caas.OperatorState
 	operatorName := k.operatorName(appName)
 	statefulSets := k.client().AppsV1().StatefulSets(k.namespace)
@@ -311,7 +311,7 @@ func (k *kubernetesClient) OperatorExists(appName string) (caas.OperatorState, e
 }
 
 // DeleteOperator deletes the specified operator.
-func (k *kubernetesClient) DeleteOperator(appName string) (err error) {
+func (k *KubernetesClient) DeleteOperator(appName string) (err error) {
 	logger.Debugf("deleting %s operator", appName)
 
 	operatorName := k.operatorName(appName)
@@ -394,7 +394,7 @@ func (k *kubernetesClient) DeleteOperator(appName string) (err error) {
 
 // WatchOperator returns a watcher which notifies when there
 // are changes to the operator of the specified application.
-func (k *kubernetesClient) WatchOperator(appName string) (watcher.NotifyWatcher, error) {
+func (k *KubernetesClient) WatchOperator(appName string) (watcher.NotifyWatcher, error) {
 	factory := informers.NewSharedInformerFactoryWithOptions(k.client(), 0,
 		informers.WithNamespace(k.namespace),
 		informers.WithTweakListOptions(func(o *v1.ListOptions) {
@@ -405,7 +405,7 @@ func (k *kubernetesClient) WatchOperator(appName string) (watcher.NotifyWatcher,
 }
 
 // Operator returns an Operator with current status and life details.
-func (k *kubernetesClient) Operator(appName string) (*caas.Operator, error) {
+func (k *KubernetesClient) Operator(appName string) (*caas.Operator, error) {
 	operatorName := k.operatorName(appName)
 	statefulSets := k.client().AppsV1().StatefulSets(k.namespace)
 	operator, err := statefulSets.Get(operatorName, v1.GetOptions{})

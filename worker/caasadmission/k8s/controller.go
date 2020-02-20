@@ -1,17 +1,16 @@
 package k8s
 
 import (
-	"context"
-	_ "encoding/json"
+	"fmt"
 	"net/http"
-	"time"
+	"net/url"
 
 	"github.com/juju/errors"
-)
+	"gopkg.in/juju/worker.v1/catacomb"
 
-type Controller struct {
-	server *http.Server
-}
+	"github.com/juju/juju/apiserver/apiserverhttp"
+	"github.com/juju/juju/caas/kubernetes/provider"
+)
 
 type Logger interface {
 	Debugf(string, ...interface{})
@@ -19,37 +18,72 @@ type Logger interface {
 	Infof(string, ...interface{})
 }
 
-const (
-	DefaultPort = "4433"
-	StopTimeout = time.Second * 120
-)
-
-func NewController(logger Logger) *Controller {
-	c := &Controller{
-		server: &http.Server{
-			Addr:    ":" + DefaultPort,
-			Handler: admissionHandler(logger),
-		},
-	}
-	return c
+type Controller struct {
+	admissionCreator AdmissionCreator
+	catacomb         catacomb.Catacomb
+	logger           Logger
+	mux              *apiserverhttp.Mux
+	path             string
+	rbacMapper       provider.RBACMapper
 }
 
-func (c *Controller) Wait() error {
-	if c.server == nil {
-		return errors.NewNotValid(nil, "controller server is nil")
+func AdmissionPathForModel(modelUUID string) string {
+	return fmt.Sprintf("/k8s/admission/%s", url.PathEscape(modelUUID))
+}
+
+func NewController(
+	logger Logger,
+	mux *apiserverhttp.Mux,
+	path string,
+	admissionCreator AdmissionCreator,
+	rbacMapper provider.RBACMapper) (*Controller, error) {
+
+	c := &Controller{
+		admissionCreator: admissionCreator,
+		logger:           logger,
+		mux:              mux,
+		path:             path,
+		rbacMapper:       rbacMapper,
 	}
 
-	if err := c.server.ListenAndServe(); err != http.ErrServerClosed {
-		return errors.Wrapf(err, nil, "starting k8s admission webhook server")
+	if err := catacomb.Invoke(catacomb.Plan{
+		Site: &c.catacomb,
+		Work: c.loop,
+	}); err != nil {
+		return c, errors.Trace(err)
+	}
+
+	if err := c.catacomb.Add(c.rbacMapper); err != nil {
+		return c, errors.Trace(err)
+	}
+
+	return c, nil
+}
+
+func (c *Controller) Kill() {
+	c.catacomb.Kill(nil)
+}
+
+func (c *Controller) loop() error {
+	if err := c.mux.AddHandler(http.MethodPost, c.path,
+		admissionHandler(c.logger)); err != nil {
+		return errors.Trace(err)
+	}
+	defer c.mux.RemoveHandler(http.MethodPost, c.path)
+
+	admissionCleanup, err := c.admissionCreator.EnsureMutatingWebhookConfiguration()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer admissionCleanup()
+
+	select {
+	case <-c.catacomb.Dying():
+		return c.catacomb.ErrDying()
 	}
 	return nil
 }
 
-func (c *Controller) Kill() {
-	if c.server == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), StopTimeout)
-	defer cancel()
-	c.server.Shutdown(ctx)
+func (c *Controller) Wait() error {
+	return c.catacomb.Wait()
 }

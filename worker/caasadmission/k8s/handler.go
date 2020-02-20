@@ -85,7 +85,6 @@ func admissionHandler(logger Logger) http.Handler {
 		}
 
 		body, err := json.Marshal(response)
-		logger.Infof("got here")
 		if err != nil {
 			logger.Errorf("marshaling admission request response body: %v", err)
 			http.Error(res, fmt.Sprintf("%s: building response body",

@@ -93,7 +93,7 @@ type controllerStack struct {
 	stackName        string
 	stackLabels      map[string]string
 	stackAnnotations map[string]string
-	broker           *kubernetesClient
+	broker           *KubernetesClient
 
 	pcfg        *podcfg.ControllerPodConfig
 	agentConfig agent.ConfigSetterWriter
@@ -121,7 +121,7 @@ type controllerStacker interface {
 	Deploy() error
 }
 
-func controllerCorelation(broker *kubernetesClient) (*kubernetesClient, error) {
+func controllerCorelation(broker *KubernetesClient) (*KubernetesClient, error) {
 	if broker.Config().Name() != environsbootstrap.ControllerModelName {
 		return broker, nil
 	}
@@ -154,7 +154,7 @@ func newcontrollerStack(
 	ctx environs.BootstrapContext,
 	stackName string,
 	storageClass string,
-	broker *kubernetesClient,
+	broker *KubernetesClient,
 	pcfg *podcfg.ControllerPodConfig,
 ) (controllerStacker, error) {
 	storageSizeControllerRaw := "20Gi"

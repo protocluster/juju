@@ -716,12 +716,14 @@ func commonManifolds(config ManifoldsConfig) dependency.Manifolds {
 		})),
 
 		modelWorkerManagerName: ifFullyUpgraded(modelworkermanager.Manifold(modelworkermanager.ManifoldConfig{
-			AgentName:      agentName,
-			StateName:      stateName,
-			Clock:          config.Clock,
-			NewWorker:      modelworkermanager.New,
-			NewModelWorker: config.NewModelWorker,
-			Logger:         loggo.GetLogger("juju.workers.modelworkermanager"),
+			AgentName:       agentName,
+			CertWatcherName: certificateWatcherName,
+			StateName:       stateName,
+			Clock:           config.Clock,
+			MuxName:         httpServerArgsName,
+			NewWorker:       modelworkermanager.New,
+			NewModelWorker:  config.NewModelWorker,
+			Logger:          loggo.GetLogger("juju.workers.modelworkermanager"),
 		})),
 
 		peergrouperName: ifFullyUpgraded(peergrouper.Manifold(peergrouper.ManifoldConfig{

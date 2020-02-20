@@ -15,13 +15,13 @@ import (
 	"github.com/juju/juju/storage"
 )
 
-func (k *kubernetesClient) getStatefulSetLabels(appName string) map[string]string {
+func (k *KubernetesClient) getStatefulSetLabels(appName string) map[string]string {
 	return map[string]string{
 		labelApplication: appName,
 	}
 }
 
-func (k *kubernetesClient) configureStatefulSet(
+func (k *KubernetesClient) configureStatefulSet(
 	appName, deploymentName string, annotations k8sannotations.Annotation, workloadSpec *workloadSpec,
 	containers []specs.ContainerSpec, replicas *int32, filesystems []storage.KubernetesFilesystemParams,
 ) error {
@@ -90,7 +90,7 @@ func (k *kubernetesClient) configureStatefulSet(
 	return k.ensureStatefulSet(statefulset, existingPodSpec)
 }
 
-func (k *kubernetesClient) ensureStatefulSet(spec *apps.StatefulSet, existingPodSpec core.PodSpec) error {
+func (k *KubernetesClient) ensureStatefulSet(spec *apps.StatefulSet, existingPodSpec core.PodSpec) error {
 	_, err := k.createStatefulSet(spec)
 	if errors.IsNotValid(err) {
 		return errors.Annotatef(err, "ensuring stateful set %q", spec.GetName())
@@ -115,7 +115,7 @@ func (k *kubernetesClient) ensureStatefulSet(spec *apps.StatefulSet, existingPod
 	return errors.Trace(err)
 }
 
-func (k *kubernetesClient) createStatefulSet(spec *apps.StatefulSet) (*apps.StatefulSet, error) {
+func (k *KubernetesClient) createStatefulSet(spec *apps.StatefulSet) (*apps.StatefulSet, error) {
 	out, err := k.client().AppsV1().StatefulSets(k.namespace).Create(spec)
 	if k8serrors.IsAlreadyExists(err) {
 		return nil, errors.AlreadyExistsf("stateful set %q", spec.GetName())
@@ -126,7 +126,7 @@ func (k *kubernetesClient) createStatefulSet(spec *apps.StatefulSet) (*apps.Stat
 	return out, errors.Trace(err)
 }
 
-func (k *kubernetesClient) updateStatefulSet(spec *apps.StatefulSet) (*apps.StatefulSet, error) {
+func (k *KubernetesClient) updateStatefulSet(spec *apps.StatefulSet) (*apps.StatefulSet, error) {
 	out, err := k.client().AppsV1().StatefulSets(k.namespace).Update(spec)
 	if k8serrors.IsNotFound(err) {
 		return nil, errors.NotFoundf("stateful set %q", spec.GetName())
@@ -137,7 +137,7 @@ func (k *kubernetesClient) updateStatefulSet(spec *apps.StatefulSet) (*apps.Stat
 	return out, errors.Trace(err)
 }
 
-func (k *kubernetesClient) getStatefulSet(name string) (*apps.StatefulSet, error) {
+func (k *KubernetesClient) getStatefulSet(name string) (*apps.StatefulSet, error) {
 	out, err := k.client().AppsV1().StatefulSets(k.namespace).Get(name, v1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
 		return nil, errors.NotFoundf("stateful set %q", name)
@@ -146,7 +146,7 @@ func (k *kubernetesClient) getStatefulSet(name string) (*apps.StatefulSet, error
 }
 
 // deleteStatefulSet deletes a statefulset resource.
-func (k *kubernetesClient) deleteStatefulSet(name string) error {
+func (k *KubernetesClient) deleteStatefulSet(name string) error {
 	deployments := k.client().AppsV1().StatefulSets(k.namespace)
 	err := deployments.Delete(name, &v1.DeleteOptions{
 		PropagationPolicy: &defaultPropagationPolicy,

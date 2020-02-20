@@ -21,7 +21,7 @@ const k8sSeries = CAASProviderType
 // all invalid parameters. If PrecheckInstance returns nil, it is not
 // guaranteed that the constraints are valid; if a non-nil error is
 // returned, then the constraints are definitely invalid.
-func (k *kubernetesClient) PrecheckInstance(ctx context.ProviderCallContext, params environs.PrecheckInstanceParams) error {
+func (k *KubernetesClient) PrecheckInstance(ctx context.ProviderCallContext, params environs.PrecheckInstanceParams) error {
 	// Ensure there are no unsupported constraints.
 	// Clouds generally don't enforce this but we will
 	// for Kubernetes deployments.

@@ -43,7 +43,7 @@ const (
 	BackOffPullImage        = "BackOff"
 )
 
-func (k *kubernetesClient) getEvents(objName string, objKind string) ([]core.Event, error) {
+func (k *KubernetesClient) getEvents(objName string, objKind string) ([]core.Event, error) {
 	selector := fields.AndSelectors(
 		fields.OneTermEqualSelector("involvedObject.name", objName),
 		fields.OneTermEqualSelector("involvedObject.kind", objKind),
@@ -58,7 +58,7 @@ func (k *kubernetesClient) getEvents(objName string, objKind string) ([]core.Eve
 	return eventList.Items, nil
 }
 
-func (k *kubernetesClient) watchEvents(objName string, objKind string) (watcher.NotifyWatcher, error) {
+func (k *KubernetesClient) watchEvents(objName string, objKind string) (watcher.NotifyWatcher, error) {
 	factory := informers.NewSharedInformerFactoryWithOptions(k.client(), 0,
 		informers.WithNamespace(k.namespace),
 		informers.WithTweakListOptions(func(o *v1.ListOptions) {

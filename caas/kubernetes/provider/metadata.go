@@ -88,7 +88,7 @@ func toCaaSStorageProvisioner(sc storage.StorageClass) *caas.StorageProvisioner 
 }
 
 // GetClusterMetadata implements ClusterMetadataChecker.
-func (k *kubernetesClient) GetClusterMetadata(storageClass string) (*caas.ClusterMetadata, error) {
+func (k *KubernetesClient) GetClusterMetadata(storageClass string) (*caas.ClusterMetadata, error) {
 	var result caas.ClusterMetadata
 	var err error
 	result.Cloud, result.Regions, err = k.listHostCloudRegions()
@@ -188,7 +188,7 @@ func (k *kubernetesClient) GetClusterMetadata(storageClass string) (*caas.Cluste
 }
 
 // listHostCloudRegions lists all the cloud regions that this cluster has worker nodes/instances running in.
-func (k *kubernetesClient) listHostCloudRegions() (string, set.Strings, error) {
+func (k *KubernetesClient) listHostCloudRegions() (string, set.Strings, error) {
 	// we only check 5 worker nodes as of now just run in the one region and
 	// we are just looking for a running worker to sniff its region.
 	nodes, err := k.client().CoreV1().Nodes().List(v1.ListOptions{Limit: 5})
@@ -209,7 +209,7 @@ func (k *kubernetesClient) listHostCloudRegions() (string, set.Strings, error) {
 }
 
 // CheckDefaultWorkloadStorage implements ClusterMetadataChecker.
-func (k *kubernetesClient) CheckDefaultWorkloadStorage(cloudType string, storageProvisioner *caas.StorageProvisioner) error {
+func (k *KubernetesClient) CheckDefaultWorkloadStorage(cloudType string, storageProvisioner *caas.StorageProvisioner) error {
 	preferredStorage, ok := jujuPreferredWorkloadStorage[cloudType]
 	if !ok {
 		return errors.NotFoundf("preferred workload storage for cloudType %q", cloudType)

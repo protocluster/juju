@@ -17,7 +17,7 @@ import (
 	k8sannotations "github.com/juju/juju/core/annotations"
 )
 
-func (k *kubernetesClient) getSecretLabels(appName string) map[string]string {
+func (k *KubernetesClient) getSecretLabels(appName string) map[string]string {
 	return map[string]string{
 		labelApplication: appName,
 	}
@@ -33,7 +33,7 @@ func processSecretData(in map[string]string) (_ map[string][]byte, err error) {
 	return out, nil
 }
 
-func (k *kubernetesClient) ensureSecrets(appName string, annotations k8sannotations.Annotation, secrets []k8sspecs.Secret) (cleanUps []func(), err error) {
+func (k *KubernetesClient) ensureSecrets(appName string, annotations k8sannotations.Annotation, secrets []k8sspecs.Secret) (cleanUps []func(), err error) {
 	for _, v := range secrets {
 		spec := &core.Secret{
 			ObjectMeta: v1.ObjectMeta{
@@ -60,7 +60,7 @@ func (k *kubernetesClient) ensureSecrets(appName string, annotations k8sannotati
 }
 
 // ensureOCIImageSecret ensures a secret exists for use with retrieving images from private registries
-func (k *kubernetesClient) ensureOCIImageSecret(
+func (k *KubernetesClient) ensureOCIImageSecret(
 	imageSecretName,
 	appName string,
 	imageDetails *specs.ImageDetails,
@@ -90,7 +90,7 @@ func (k *kubernetesClient) ensureOCIImageSecret(
 	return errors.Trace(err)
 }
 
-func (k *kubernetesClient) ensureSecret(sec *core.Secret) (func(), error) {
+func (k *KubernetesClient) ensureSecret(sec *core.Secret) (func(), error) {
 	cleanUp := func() {}
 	out, err := k.createSecret(sec)
 	if err == nil {
@@ -115,7 +115,7 @@ func (k *kubernetesClient) ensureSecret(sec *core.Secret) (func(), error) {
 }
 
 // updateSecret updates a secret resource.
-func (k *kubernetesClient) updateSecret(sec *core.Secret) error {
+func (k *KubernetesClient) updateSecret(sec *core.Secret) error {
 	_, err := k.client().CoreV1().Secrets(k.namespace).Update(sec)
 	if k8serrors.IsNotFound(err) {
 		return errors.NotFoundf("secret %q", sec.GetName())
@@ -124,7 +124,7 @@ func (k *kubernetesClient) updateSecret(sec *core.Secret) error {
 }
 
 // getSecret return a secret resource.
-func (k *kubernetesClient) getSecret(secretName string) (*core.Secret, error) {
+func (k *KubernetesClient) getSecret(secretName string) (*core.Secret, error) {
 	secret, err := k.client().CoreV1().Secrets(k.namespace).Get(secretName, v1.GetOptions{})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
@@ -136,7 +136,7 @@ func (k *kubernetesClient) getSecret(secretName string) (*core.Secret, error) {
 }
 
 // createSecret creates a secret resource.
-func (k *kubernetesClient) createSecret(secret *core.Secret) (*core.Secret, error) {
+func (k *KubernetesClient) createSecret(secret *core.Secret) (*core.Secret, error) {
 	purifyResource(secret)
 	out, err := k.client().CoreV1().Secrets(k.namespace).Create(secret)
 	if k8serrors.IsAlreadyExists(err) {
@@ -146,7 +146,7 @@ func (k *kubernetesClient) createSecret(secret *core.Secret) (*core.Secret, erro
 }
 
 // deleteSecret deletes a secret resource.
-func (k *kubernetesClient) deleteSecret(secretName string, uid types.UID) error {
+func (k *KubernetesClient) deleteSecret(secretName string, uid types.UID) error {
 	err := k.client().CoreV1().Secrets(k.namespace).Delete(secretName, newPreconditionDeleteOptions(uid))
 	if k8serrors.IsNotFound(err) {
 		return nil
@@ -154,7 +154,7 @@ func (k *kubernetesClient) deleteSecret(secretName string, uid types.UID) error 
 	return errors.Trace(err)
 }
 
-func (k *kubernetesClient) listSecrets(labels map[string]string) ([]core.Secret, error) {
+func (k *KubernetesClient) listSecrets(labels map[string]string) ([]core.Secret, error) {
 	listOps := v1.ListOptions{
 		LabelSelector: labelsToSelector(labels),
 	}
@@ -168,7 +168,7 @@ func (k *kubernetesClient) listSecrets(labels map[string]string) ([]core.Secret,
 	return secList.Items, nil
 }
 
-func (k *kubernetesClient) deleteSecrets(appName string) error {
+func (k *KubernetesClient) deleteSecrets(appName string) error {
 	err := k.client().CoreV1().Secrets(k.namespace).DeleteCollection(&v1.DeleteOptions{
 		PropagationPolicy: &defaultPropagationPolicy,
 	}, v1.ListOptions{

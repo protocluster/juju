@@ -60,12 +60,12 @@ func ValidateStorageProvider(providerType storage.ProviderType, attributes map[s
 }
 
 // StorageProviderTypes is defined on the storage.ProviderRegistry interface.
-func (k *kubernetesClient) StorageProviderTypes() ([]storage.ProviderType, error) {
+func (k *KubernetesClient) StorageProviderTypes() ([]storage.ProviderType, error) {
 	return []storage.ProviderType{K8s_ProviderType}, nil
 }
 
 // StorageProvider is defined on the storage.ProviderRegistry interface.
-func (k *kubernetesClient) StorageProvider(t storage.ProviderType) (storage.Provider, error) {
+func (k *KubernetesClient) StorageProvider(t storage.ProviderType) (storage.Provider, error) {
 	if t == K8s_ProviderType {
 		return &storageProvider{k}, nil
 	}
@@ -73,7 +73,7 @@ func (k *kubernetesClient) StorageProvider(t storage.ProviderType) (storage.Prov
 }
 
 type storageProvider struct {
-	client *kubernetesClient
+	client *KubernetesClient
 }
 
 var _ storage.Provider = (*storageProvider)(nil)
@@ -181,7 +181,7 @@ func (g *storageProvider) FilesystemSource(providerConfig *storage.Config) (stor
 }
 
 type volumeSource struct {
-	client *kubernetesClient
+	client *KubernetesClient
 }
 
 var _ storage.VolumeSource = (*volumeSource)(nil)

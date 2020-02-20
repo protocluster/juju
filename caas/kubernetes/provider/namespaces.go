@@ -33,7 +33,7 @@ func checkNamespaceOwnedByJuju(ns *core.Namespace, annotationMap map[string]stri
 }
 
 // Namespaces returns names of the namespaces on the cluster.
-func (k *kubernetesClient) Namespaces() ([]string, error) {
+func (k *KubernetesClient) Namespaces() ([]string, error) {
 	namespaces := k.client().CoreV1().Namespaces()
 	ns, err := namespaces.List(v1.ListOptions{})
 	if err != nil {
@@ -50,7 +50,7 @@ func (k *kubernetesClient) Namespaces() ([]string, error) {
 }
 
 // GetNamespace returns the namespace for the specified name.
-func (k *kubernetesClient) GetNamespace(name string) (*core.Namespace, error) {
+func (k *KubernetesClient) GetNamespace(name string) (*core.Namespace, error) {
 	ns, err := k.getNamespaceByName(name)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -63,7 +63,7 @@ func (k *kubernetesClient) GetNamespace(name string) (*core.Namespace, error) {
 
 // getNamespaceByName is used internally for bootstrap.
 // Note: it should be never used by something else. "GetNamespace" is what you should use.
-func (k *kubernetesClient) getNamespaceByName(name string) (*core.Namespace, error) {
+func (k *KubernetesClient) getNamespaceByName(name string) (*core.Namespace, error) {
 	ns, err := k.client().CoreV1().Namespaces().Get(name, v1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
 		return nil, errors.NotFoundf("namespace %q", name)
@@ -76,12 +76,12 @@ func (k *kubernetesClient) getNamespaceByName(name string) (*core.Namespace, err
 
 // SetNamespace sets current namespace to the specified name.
 // Note: this does not ensure related namespace resources.
-func (k *kubernetesClient) SetNamespace(name string) {
+func (k *KubernetesClient) SetNamespace(name string) {
 	k.namespace = name
 }
 
 // listNamespacesByAnnotations filters namespaces by annotations.
-func (k *kubernetesClient) listNamespacesByAnnotations(annotations k8sannotations.Annotation) ([]core.Namespace, error) {
+func (k *KubernetesClient) listNamespacesByAnnotations(annotations k8sannotations.Annotation) ([]core.Namespace, error) {
 	namespaces, err := k.client().CoreV1().Namespaces().List(v1.ListOptions{})
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -106,11 +106,11 @@ func (k *kubernetesClient) listNamespacesByAnnotations(annotations k8sannotation
 }
 
 // GetCurrentNamespace returns current namespace name.
-func (k *kubernetesClient) GetCurrentNamespace() string {
+func (k *KubernetesClient) GetCurrentNamespace() string {
 	return k.namespace
 }
 
-func (k *kubernetesClient) ensureNamespaceAnnotations(ns *core.Namespace) error {
+func (k *KubernetesClient) ensureNamespaceAnnotations(ns *core.Namespace) error {
 	annotations := k8sannotations.New(ns.GetAnnotations()).Merge(k.annotations)
 	// check required keys are set: annotationControllerUUIDKey, annotationModelUUIDKey.
 	if err := annotations.CheckKeysNonEmpty(requireAnnotationsForNameSpace...); err != nil {
@@ -121,7 +121,7 @@ func (k *kubernetesClient) ensureNamespaceAnnotations(ns *core.Namespace) error 
 }
 
 // createNamespace creates a named namespace.
-func (k *kubernetesClient) createNamespace(name string) error {
+func (k *KubernetesClient) createNamespace(name string) error {
 	ns := &core.Namespace{ObjectMeta: v1.ObjectMeta{Name: name}}
 	if err := k.ensureNamespaceAnnotations(ns); err != nil {
 		return errors.Trace(err)
@@ -133,7 +133,7 @@ func (k *kubernetesClient) createNamespace(name string) error {
 	return errors.Trace(err)
 }
 
-func (k *kubernetesClient) deleteNamespace() error {
+func (k *KubernetesClient) deleteNamespace() error {
 	// deleteNamespace is used as a means to implement Destroy().
 	// All model resources are provisioned in the namespace;
 	// deleting the namespace will also delete those resources.
@@ -160,7 +160,7 @@ func (k *kubernetesClient) deleteNamespace() error {
 
 // WatchNamespace returns a watcher which notifies when there
 // are changes to current namespace.
-func (k *kubernetesClient) WatchNamespace() (watcher.NotifyWatcher, error) {
+func (k *KubernetesClient) WatchNamespace() (watcher.NotifyWatcher, error) {
 	factory := informers.NewSharedInformerFactoryWithOptions(k.client(), 0,
 		informers.WithTweakListOptions(func(o *v1.ListOptions) {
 			o.FieldSelector = fields.OneTermEqualSelector("metadata.name", k.namespace).String()
