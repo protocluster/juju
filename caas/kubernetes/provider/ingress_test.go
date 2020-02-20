@@ -36,7 +36,8 @@ func (s *K8sBrokerSuite) assertIngressResources(c *gc.C, IngressResources []k8ss
 	numUnits := int32(2)
 	statefulSetArg := &appsv1.StatefulSet{
 		ObjectMeta: v1.ObjectMeta{
-			Name: "app-name",
+			Name:   "app-name",
+			Labels: map[string]string{"juju-app": "app-name"},
 			Annotations: map[string]string{
 				"juju-app-uuid":      "appuuid",
 				"juju.io/controller": testing.ControllerTag.Id(),
@@ -68,7 +69,7 @@ func (s *K8sBrokerSuite) assertIngressResources(c *gc.C, IngressResources []k8ss
 
 	assertCalls = append(
 		[]*gomock.Call{
-			s.mockStatefulSets.EXPECT().Get("juju-operator-app-name", v1.GetOptions{IncludeUninitialized: true}).
+			s.mockStatefulSets.EXPECT().Get("juju-operator-app-name", v1.GetOptions{}).
 				Return(nil, s.k8sNotFoundError()),
 		},
 		assertCalls...,
@@ -80,23 +81,25 @@ func (s *K8sBrokerSuite) assertIngressResources(c *gc.C, IngressResources []k8ss
 		assertCalls = append(assertCalls, []*gomock.Call{
 			s.mockSecrets.EXPECT().Create(ociImageSecret).
 				Return(ociImageSecret, nil),
-			s.mockStatefulSets.EXPECT().Get("app-name", v1.GetOptions{IncludeUninitialized: true}).
-				Return(nil, s.k8sNotFoundError()),
-			s.mockServices.EXPECT().Get("app-name", v1.GetOptions{IncludeUninitialized: true}).
+			s.mockServices.EXPECT().Get("app-name", v1.GetOptions{}).
 				Return(nil, s.k8sNotFoundError()),
 			s.mockServices.EXPECT().Update(&serviceArg).
 				Return(nil, s.k8sNotFoundError()),
 			s.mockServices.EXPECT().Create(&serviceArg).
 				Return(nil, nil),
-			s.mockServices.EXPECT().Get("app-name-endpoints", v1.GetOptions{IncludeUninitialized: true}).
+			s.mockServices.EXPECT().Get("app-name-endpoints", v1.GetOptions{}).
 				Return(nil, s.k8sNotFoundError()),
 			s.mockServices.EXPECT().Update(basicHeadlessServiceArg).
 				Return(nil, s.k8sNotFoundError()),
 			s.mockServices.EXPECT().Create(basicHeadlessServiceArg).
 				Return(nil, nil),
-			s.mockStatefulSets.EXPECT().Update(statefulSetArg).
-				Return(nil, s.k8sNotFoundError()),
+			s.mockStatefulSets.EXPECT().Get("app-name", v1.GetOptions{}).
+				Return(statefulSetArg, nil),
 			s.mockStatefulSets.EXPECT().Create(statefulSetArg).
+				Return(nil, nil),
+			s.mockStatefulSets.EXPECT().Get("app-name", v1.GetOptions{}).
+				Return(statefulSetArg, nil),
+			s.mockStatefulSets.EXPECT().Update(statefulSetArg).
 				Return(nil, nil),
 		}...)
 	}
@@ -231,7 +234,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceIngressResourcesUpdate(c *gc.C) {
 	s.assertIngressResources(
 		c, IngressResources, "",
 		s.mockIngressInterface.EXPECT().Create(ingress).Return(nil, s.k8sAlreadyExistsError()),
-		s.mockIngressInterface.EXPECT().Get("test-ingress", v1.GetOptions{IncludeUninitialized: true}).Return(ingress, nil),
+		s.mockIngressInterface.EXPECT().Get("test-ingress", v1.GetOptions{}).Return(ingress, nil),
 		s.mockIngressInterface.EXPECT().Update(ingress).Return(ingress, nil),
 	)
 }
@@ -294,6 +297,6 @@ func (s *K8sBrokerSuite) TestEnsureServiceIngressResourcesUpdateConflictWithExis
 	s.assertIngressResources(
 		c, IngressResources, `creating or updating ingress resources: existing ingress "test-ingress" found which does not belong to "app-name"`,
 		s.mockIngressInterface.EXPECT().Create(ingress).Return(nil, s.k8sAlreadyExistsError()),
-		s.mockIngressInterface.EXPECT().Get("test-ingress", v1.GetOptions{IncludeUninitialized: true}).Return(existingNonJujuManagedIngress, nil),
+		s.mockIngressInterface.EXPECT().Get("test-ingress", v1.GetOptions{}).Return(existingNonJujuManagedIngress, nil),
 	)
 }

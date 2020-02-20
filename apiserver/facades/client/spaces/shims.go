@@ -19,8 +19,11 @@ func NewStateShim(st *state.State) (*stateShim, error) {
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	return &stateShim{EnvironConfigGetter: stateenvirons.EnvironConfigGetter{State: st, Model: m},
-		State: st, modelTag: m.ModelTag()}, nil
+	return &stateShim{
+		EnvironConfigGetter: stateenvirons.EnvironConfigGetter{State: st, Model: m},
+		State:               st,
+		model:               m,
+	}, nil
 }
 
 // stateShim forwards and adapts state.State methods to Backing
@@ -28,16 +31,52 @@ func NewStateShim(st *state.State) (*stateShim, error) {
 type stateShim struct {
 	stateenvirons.EnvironConfigGetter
 	*state.State
-	modelTag names.ModelTag
+	model *state.Model
 }
 
 func (s *stateShim) ModelTag() names.ModelTag {
-	return s.modelTag
+	return s.model.ModelTag()
 }
 
 func (s *stateShim) AddSpace(name string, providerId network.Id, subnetIds []string, public bool) error {
 	_, err := s.State.AddSpace(name, providerId, subnetIds, public)
 	return err
+}
+
+func (s *stateShim) SpaceByName(name string) (networkingcommon.BackingSpace, error) {
+	result, err := s.State.SpaceByName(name)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	space := networkingcommon.NewSpaceShim(result)
+	return space, nil
+}
+
+// AllEndpointBindings returns all endpoint bindings and maps it to a corresponding common type
+func (s *stateShim) AllEndpointBindings() ([]ApplicationEndpointBindingsShim, error) {
+	endpointBindings, err := s.model.AllEndpointBindings()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	all := make([]ApplicationEndpointBindingsShim, len(endpointBindings))
+	for i, value := range endpointBindings {
+		all[i].AppName = value.AppName
+		all[i].Bindings = value.Bindings.Map()
+	}
+	return all, nil
+}
+
+// AllMachines returns all machines and maps it to a corresponding common type.
+func (s *stateShim) AllMachines() ([]Machine, error) {
+	allStateMachines, err := s.State.AllMachines()
+	if err != nil {
+		return nil, err
+	}
+	all := make([]Machine, len(allStateMachines))
+	for i, m := range allStateMachines {
+		all[i] = m
+	}
+	return all, nil
 }
 
 func (s *stateShim) AllSpaces() ([]networkingcommon.BackingSpace, error) {
@@ -58,4 +97,16 @@ func (s *stateShim) SubnetByCIDR(cidr string) (networkingcommon.BackingSubnet, e
 		return nil, errors.Trace(err)
 	}
 	return networkingcommon.NewSubnetShim(result), nil
+}
+
+func (s *stateShim) ConstraintsBySpaceName(spaceName string) ([]Constraints, error) {
+	found, err := s.State.ConstraintsBySpaceName(spaceName)
+	if err != nil {
+		return nil, err
+	}
+	cons := make([]Constraints, len(found))
+	for i, v := range found {
+		cons[i] = v
+	}
+	return cons, nil
 }

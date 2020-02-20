@@ -31,6 +31,26 @@ func (*RestrictedContext) GoalState() (*application.GoalState, error) {
 	return &application.GoalState{}, ErrRestrictedContext
 }
 
+// GetCache implements jujuc.unitCacheContext.
+func (*RestrictedContext) GetCache() (map[string]string, error) {
+	return nil, ErrRestrictedContext
+}
+
+// GetSingleCacheValue implements jujuc.unitCacheContext.
+func (*RestrictedContext) GetSingleCacheValue(string) (string, error) {
+	return "", ErrRestrictedContext
+}
+
+// DeleteCacheValue implements jujuc.unitCacheContext.
+func (*RestrictedContext) DeleteCacheValue(string) error {
+	return ErrRestrictedContext
+}
+
+// SetCacheValue implements jujuc.unitCacheContext.
+func (*RestrictedContext) SetCacheValue(string, string) error {
+	return ErrRestrictedContext
+}
+
 // UnitStatus implements hooks.Context.
 func (*RestrictedContext) UnitStatus() (*StatusInfo, error) {
 	return nil, ErrRestrictedContext

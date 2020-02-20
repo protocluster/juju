@@ -1,7 +1,7 @@
 [
     {
         "Name": "Action",
-        "Version": 5,
+        "Version": 6,
         "Schema": {
             "type": "object",
             "properties": {
@@ -46,6 +46,17 @@
                         },
                         "Result": {
                             "$ref": "#/definitions/ActionResults"
+                        }
+                    }
+                },
+                "EnqueueOperation": {
+                    "type": "object",
+                    "properties": {
+                        "Params": {
+                            "$ref": "#/definitions/Actions"
+                        },
+                        "Result": {
+                            "$ref": "#/definitions/EnqueuedActions"
                         }
                     }
                 },
@@ -122,7 +133,7 @@
                             "$ref": "#/definitions/OperationQueryArgs"
                         },
                         "Result": {
-                            "$ref": "#/definitions/ActionResults"
+                            "$ref": "#/definitions/OperationResults"
                         }
                     }
                 },
@@ -390,6 +401,24 @@
                     },
                     "additionalProperties": false
                 },
+                "EnqueuedActions": {
+                    "type": "object",
+                    "properties": {
+                        "actions": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/StringResult"
+                            }
+                        },
+                        "operation": {
+                            "type": "string"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "operation"
+                    ]
+                },
                 "Entities": {
                     "type": "object",
                     "properties": {
@@ -492,17 +521,23 @@
                 "OperationQueryArgs": {
                     "type": "object",
                     "properties": {
+                        "actions": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "applications": {
                             "type": "array",
                             "items": {
                                 "type": "string"
                             }
                         },
-                        "functions": {
-                            "type": "array",
-                            "items": {
-                                "type": "string"
-                            }
+                        "limit": {
+                            "type": "integer"
+                        },
+                        "offset": {
+                            "type": "integer"
                         },
                         "status": {
                             "type": "array",
@@ -515,6 +550,58 @@
                             "items": {
                                 "type": "string"
                             }
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "OperationResult": {
+                    "type": "object",
+                    "properties": {
+                        "actions": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/ActionResult"
+                            }
+                        },
+                        "completed": {
+                            "type": "string",
+                            "format": "date-time"
+                        },
+                        "enqueued": {
+                            "type": "string",
+                            "format": "date-time"
+                        },
+                        "operation": {
+                            "type": "string"
+                        },
+                        "started": {
+                            "type": "string",
+                            "format": "date-time"
+                        },
+                        "status": {
+                            "type": "string"
+                        },
+                        "summary": {
+                            "type": "string"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "operation",
+                        "summary"
+                    ]
+                },
+                "OperationResults": {
+                    "type": "object",
+                    "properties": {
+                        "results": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/OperationResult"
+                            }
+                        },
+                        "truncated": {
+                            "type": "boolean"
                         }
                     },
                     "additionalProperties": false
@@ -554,6 +641,21 @@
                     "required": [
                         "commands",
                         "timeout"
+                    ]
+                },
+                "StringResult": {
+                    "type": "object",
+                    "properties": {
+                        "error": {
+                            "$ref": "#/definitions/Error"
+                        },
+                        "result": {
+                            "type": "string"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "result"
                     ]
                 },
                 "StringsWatchResult": {
@@ -3432,7 +3534,7 @@
                             "type": "string"
                         },
                         "life": {
-                            "$ref": "#/definitions/Value"
+                            "type": "string"
                         },
                         "provider-id": {
                             "type": "string"
@@ -4210,6 +4312,9 @@
                 "OfferURLs": {
                     "type": "object",
                     "properties": {
+                        "bakery-version": {
+                            "type": "integer"
+                        },
                         "offer-urls": {
                             "type": "array",
                             "items": {
@@ -4685,12 +4790,27 @@
                         "checksum-format": {
                             "type": "string"
                         },
+                        "controller-machine-id": {
+                            "type": "string"
+                        },
+                        "controller-machine-inst-id": {
+                            "type": "string"
+                        },
+                        "controller-uuid": {
+                            "type": "string"
+                        },
                         "filename": {
                             "type": "string"
                         },
                         "finished": {
                             "type": "string",
                             "format": "date-time"
+                        },
+                        "format-version": {
+                            "type": "integer"
+                        },
+                        "ha-nodes": {
+                            "type": "integer"
                         },
                         "hostname": {
                             "type": "string"
@@ -4742,7 +4862,12 @@
                         "series",
                         "ca-cert",
                         "ca-private-key",
-                        "filename"
+                        "filename",
+                        "format-version",
+                        "controller-uuid",
+                        "controller-machine-id",
+                        "controller-machine-inst-id",
+                        "ha-nodes"
                     ]
                 },
                 "BackupsRemoveArgs": {
@@ -9371,7 +9496,7 @@
                             "type": "integer"
                         },
                         "life": {
-                            "$ref": "#/definitions/Value"
+                            "type": "string"
                         },
                         "meter-statuses": {
                             "type": "object",
@@ -9667,7 +9792,7 @@
                             "type": "string"
                         },
                         "life": {
-                            "$ref": "#/definitions/Value"
+                            "type": "string"
                         },
                         "since": {
                             "type": "string",
@@ -10175,6 +10300,9 @@
                                 }
                             }
                         },
+                        "primary-controller-machine": {
+                            "type": "boolean"
+                        },
                         "series": {
                             "type": "string"
                         },
@@ -10261,7 +10389,7 @@
                             "type": "boolean"
                         },
                         "life": {
-                            "$ref": "#/definitions/Value"
+                            "type": "string"
                         },
                         "machines": {
                             "type": "array",
@@ -10321,6 +10449,9 @@
                     "properties": {
                         "display-name": {
                             "type": "string"
+                        },
+                        "ha-primary": {
+                            "type": "boolean"
                         },
                         "hardware": {
                             "$ref": "#/definitions/MachineHardware"
@@ -10752,7 +10883,7 @@
                             "$ref": "#/definitions/Error"
                         },
                         "life": {
-                            "$ref": "#/definitions/Value"
+                            "type": "string"
                         },
                         "offer-name": {
                             "type": "string"
@@ -13064,6 +13195,9 @@
                         "display-name": {
                             "type": "string"
                         },
+                        "ha-primary": {
+                            "type": "boolean"
+                        },
                         "hardware": {
                             "$ref": "#/definitions/MachineHardware"
                         },
@@ -13853,6 +13987,9 @@
                         "application-token": {
                             "type": "string"
                         },
+                        "bakery-version": {
+                            "type": "integer"
+                        },
                         "ingress-required": {
                             "type": "boolean"
                         },
@@ -13898,6 +14035,9 @@
                 "OfferArg": {
                     "type": "object",
                     "properties": {
+                        "bakery-version": {
+                            "type": "integer"
+                        },
                         "macaroons": {
                             "type": "array",
                             "items": {
@@ -13986,6 +14126,9 @@
                     "properties": {
                         "application-token": {
                             "type": "string"
+                        },
+                        "bakery-version": {
+                            "type": "integer"
                         },
                         "local-endpoint-name": {
                             "type": "string"
@@ -14150,6 +14293,9 @@
                 "RemoteEntityArg": {
                     "type": "object",
                     "properties": {
+                        "bakery-version": {
+                            "type": "integer"
+                        },
                         "macaroons": {
                             "type": "array",
                             "items": {
@@ -14195,6 +14341,9 @@
                         "application-token": {
                             "type": "string"
                         },
+                        "bakery-version": {
+                            "type": "integer"
+                        },
                         "changed-units": {
                             "type": "array",
                             "items": {
@@ -14239,6 +14388,9 @@
                 "RemoteRelationDetails": {
                     "type": "object",
                     "properties": {
+                        "bakery-version": {
+                            "type": "integer"
+                        },
                         "macaroon": {
                             "$ref": "#/definitions/Macaroon"
                         },
@@ -24253,6 +24405,9 @@
                         "display-name": {
                             "type": "string"
                         },
+                        "ha-primary": {
+                            "type": "boolean"
+                        },
                         "hardware": {
                             "$ref": "#/definitions/MachineHardware"
                         },
@@ -25555,7 +25710,7 @@
     },
     {
         "Name": "Provisioner",
-        "Version": 9,
+        "Version": 10,
         "Schema": {
             "type": "object",
             "properties": {
@@ -25817,7 +25972,7 @@
                             "$ref": "#/definitions/Entities"
                         },
                         "Result": {
-                            "$ref": "#/definitions/ProvisioningInfoResults"
+                            "$ref": "#/definitions/ProvisioningInfoResultsV10"
                         }
                     }
                 },
@@ -26938,7 +27093,7 @@
                             "$ref": "#/definitions/Error"
                         },
                         "life": {
-                            "$ref": "#/definitions/Value"
+                            "type": "string"
                         }
                     },
                     "additionalProperties": false,
@@ -27259,7 +27414,7 @@
                         "Build"
                     ]
                 },
-                "ProvisioningInfo": {
+                "ProvisioningInfoBase": {
                     "type": "object",
                     "properties": {
                         "charm-lxd-profiles": {
@@ -27315,7 +27470,139 @@
                         "series": {
                             "type": "string"
                         },
-                        "subnets-to-zones": {
+                        "tags": {
+                            "type": "object",
+                            "patternProperties": {
+                                ".*": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "volume-attachments": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/VolumeAttachmentParams"
+                            }
+                        },
+                        "volumes": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/VolumeParams"
+                            }
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "constraints",
+                        "series",
+                        "placement",
+                        "jobs"
+                    ]
+                },
+                "ProvisioningInfoResultV10": {
+                    "type": "object",
+                    "properties": {
+                        "error": {
+                            "$ref": "#/definitions/Error"
+                        },
+                        "result": {
+                            "$ref": "#/definitions/ProvisioningInfoV10"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "result"
+                    ]
+                },
+                "ProvisioningInfoResultsV10": {
+                    "type": "object",
+                    "properties": {
+                        "results": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/ProvisioningInfoResultV10"
+                            }
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "results"
+                    ]
+                },
+                "ProvisioningInfoV10": {
+                    "type": "object",
+                    "properties": {
+                        "ProvisioningInfoBase": {
+                            "$ref": "#/definitions/ProvisioningInfoBase"
+                        },
+                        "ProvisioningNetworkTopology": {
+                            "$ref": "#/definitions/ProvisioningNetworkTopology"
+                        },
+                        "charm-lxd-profiles": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "cloudinit-userdata": {
+                            "type": "object",
+                            "patternProperties": {
+                                ".*": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        },
+                        "constraints": {
+                            "$ref": "#/definitions/Value"
+                        },
+                        "controller-config": {
+                            "type": "object",
+                            "patternProperties": {
+                                ".*": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            }
+                        },
+                        "endpoint-bindings": {
+                            "type": "object",
+                            "patternProperties": {
+                                ".*": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "image-metadata": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/CloudImageMetadata"
+                            }
+                        },
+                        "jobs": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "placement": {
+                            "type": "string"
+                        },
+                        "series": {
+                            "type": "string"
+                        },
+                        "space-subnets": {
+                            "type": "object",
+                            "patternProperties": {
+                                ".*": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        },
+                        "subnet-zones": {
                             "type": "object",
                             "patternProperties": {
                                 ".*": {
@@ -27352,37 +27639,43 @@
                         "constraints",
                         "series",
                         "placement",
-                        "jobs"
+                        "jobs",
+                        "ProvisioningInfoBase",
+                        "subnet-zones",
+                        "space-subnets",
+                        "ProvisioningNetworkTopology"
                     ]
                 },
-                "ProvisioningInfoResult": {
+                "ProvisioningNetworkTopology": {
                     "type": "object",
                     "properties": {
-                        "error": {
-                            "$ref": "#/definitions/Error"
+                        "space-subnets": {
+                            "type": "object",
+                            "patternProperties": {
+                                ".*": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
                         },
-                        "result": {
-                            "$ref": "#/definitions/ProvisioningInfo"
-                        }
-                    },
-                    "additionalProperties": false,
-                    "required": [
-                        "result"
-                    ]
-                },
-                "ProvisioningInfoResults": {
-                    "type": "object",
-                    "properties": {
-                        "results": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/ProvisioningInfoResult"
+                        "subnet-zones": {
+                            "type": "object",
+                            "patternProperties": {
+                                ".*": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                }
                             }
                         }
                     },
                     "additionalProperties": false,
                     "required": [
-                        "results"
+                        "subnet-zones",
+                        "space-subnets"
                     ]
                 },
                 "SetMachineNetworkConfig": {
@@ -27503,7 +27796,7 @@
                             "type": "string"
                         },
                         "life": {
-                            "$ref": "#/definitions/Value"
+                            "type": "string"
                         },
                         "since": {
                             "type": "string",
@@ -28567,6 +28860,9 @@
                         "application-token": {
                             "type": "string"
                         },
+                        "bakery-version": {
+                            "type": "integer"
+                        },
                         "changed-units": {
                             "type": "array",
                             "items": {
@@ -29234,6 +29530,9 @@
                         },
                         "application-token": {
                             "type": "string"
+                        },
+                        "bakery-version": {
+                            "type": "integer"
                         },
                         "changed-units": {
                             "type": "array",
@@ -30654,7 +30953,7 @@
     },
     {
         "Name": "Spaces",
-        "Version": 5,
+        "Version": 6,
         "Schema": {
             "type": "object",
             "properties": {
@@ -30679,6 +30978,39 @@
                 },
                 "ReloadSpaces": {
                     "type": "object"
+                },
+                "RemoveSpace": {
+                    "type": "object",
+                    "properties": {
+                        "Params": {
+                            "$ref": "#/definitions/Entities"
+                        },
+                        "Result": {
+                            "$ref": "#/definitions/RemoveSpaceResults"
+                        }
+                    }
+                },
+                "RenameSpace": {
+                    "type": "object",
+                    "properties": {
+                        "Params": {
+                            "$ref": "#/definitions/RenameSpacesParams"
+                        },
+                        "Result": {
+                            "$ref": "#/definitions/ErrorResults"
+                        }
+                    }
+                },
+                "ShowSpace": {
+                    "type": "object",
+                    "properties": {
+                        "Params": {
+                            "$ref": "#/definitions/Entities"
+                        },
+                        "Result": {
+                            "$ref": "#/definitions/ShowSpaceResults"
+                        }
+                    }
                 }
             },
             "definitions": {
@@ -30721,6 +31053,33 @@
                     "additionalProperties": false,
                     "required": [
                         "spaces"
+                    ]
+                },
+                "Entities": {
+                    "type": "object",
+                    "properties": {
+                        "entities": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/Entity"
+                            }
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "entities"
+                    ]
+                },
+                "Entity": {
+                    "type": "object",
+                    "properties": {
+                        "tag": {
+                            "type": "string"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "tag"
                     ]
                 },
                 "Error": {
@@ -30779,6 +31138,120 @@
                             "type": "array",
                             "items": {
                                 "$ref": "#/definitions/Space"
+                            }
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "results"
+                    ]
+                },
+                "RemoveSpaceResult": {
+                    "type": "object",
+                    "properties": {
+                        "bindings": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/Entity"
+                            }
+                        },
+                        "constraints": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/Entity"
+                            }
+                        },
+                        "controller-settings": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "error": {
+                            "$ref": "#/definitions/Error"
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "RemoveSpaceResults": {
+                    "type": "object",
+                    "properties": {
+                        "results": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/RemoveSpaceResult"
+                            }
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "results"
+                    ]
+                },
+                "RenameSpaceParams": {
+                    "type": "object",
+                    "properties": {
+                        "from-space-tag": {
+                            "type": "string"
+                        },
+                        "to-space-tag": {
+                            "type": "string"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "from-space-tag",
+                        "to-space-tag"
+                    ]
+                },
+                "RenameSpacesParams": {
+                    "type": "object",
+                    "properties": {
+                        "rename-spaces": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/RenameSpaceParams"
+                            }
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "rename-spaces"
+                    ]
+                },
+                "ShowSpaceResult": {
+                    "type": "object",
+                    "properties": {
+                        "applications": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "error": {
+                            "$ref": "#/definitions/Error"
+                        },
+                        "machine-count": {
+                            "type": "integer"
+                        },
+                        "space": {
+                            "$ref": "#/definitions/Space"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "space",
+                        "applications",
+                        "machine-count"
+                    ]
+                },
+                "ShowSpaceResults": {
+                    "type": "object",
+                    "properties": {
+                        "results": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/ShowSpaceResult"
                             }
                         }
                     },
@@ -34412,7 +34885,7 @@
     },
     {
         "Name": "Uniter",
-        "Version": 14,
+        "Version": 15,
         "Schema": {
             "type": "object",
             "properties": {
@@ -35016,6 +35489,17 @@
                         }
                     }
                 },
+                "SetState": {
+                    "type": "object",
+                    "properties": {
+                        "Params": {
+                            "$ref": "#/definitions/SetUnitStateArgs"
+                        },
+                        "Result": {
+                            "$ref": "#/definitions/ErrorResults"
+                        }
+                    }
+                },
                 "SetStatus": {
                     "type": "object",
                     "properties": {
@@ -35057,6 +35541,17 @@
                         },
                         "Result": {
                             "$ref": "#/definitions/ErrorResults"
+                        }
+                    }
+                },
+                "State": {
+                    "type": "object",
+                    "properties": {
+                        "Params": {
+                            "$ref": "#/definitions/Entities"
+                        },
+                        "Result": {
+                            "$ref": "#/definitions/UnitStateResults"
                         }
                     }
                 },
@@ -36994,6 +37489,42 @@
                         "entities"
                     ]
                 },
+                "SetUnitStateArg": {
+                    "type": "object",
+                    "properties": {
+                        "state": {
+                            "type": "object",
+                            "patternProperties": {
+                                ".*": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "tag": {
+                            "type": "string"
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "tag",
+                        "state"
+                    ]
+                },
+                "SetUnitStateArgs": {
+                    "type": "object",
+                    "properties": {
+                        "args": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/SetUnitStateArg"
+                            }
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "args"
+                    ]
+                },
                 "SettingsResult": {
                     "type": "object",
                     "properties": {
@@ -37416,6 +37947,41 @@
                     "additionalProperties": false,
                     "required": [
                         "version"
+                    ]
+                },
+                "UnitStateResult": {
+                    "type": "object",
+                    "properties": {
+                        "error": {
+                            "$ref": "#/definitions/Error"
+                        },
+                        "state": {
+                            "type": "object",
+                            "patternProperties": {
+                                ".*": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "state"
+                    ]
+                },
+                "UnitStateResults": {
+                    "type": "object",
+                    "properties": {
+                        "results": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/UnitStateResult"
+                            }
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "results"
                     ]
                 },
                 "UpgradeSeriesStatusParam": {

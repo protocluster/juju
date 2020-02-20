@@ -54,10 +54,6 @@ Currently available charm hook tools are:
     close-port               ensure a port or range is always closed
     config-get               print application configuration
     credential-get           access cloud credentials
-    function-fail            set action/function fail status with message
-    function-get             get action/function parameters
-    function-log             record a progress message for the current action/function
-    function-set             set action/function results
     goal-state               print the status of the charm's peers and related units
     is-leader                print application leadership status
     juju-log                 write a message to the juju log
@@ -73,6 +69,9 @@ Currently available charm hook tools are:
     relation-ids             list all relation ids with the given relation name
     relation-list            list relation units
     relation-set             set relation settings
+    state-delete             delete server-side-state key value pair
+    state-get                print server-side-state value
+    state-set                set server-side-state values
     status-get               print status information
     status-set               set status information
     storage-add              add storage instances
@@ -100,10 +99,6 @@ var expectedCommands = []string{
 	"close-port",
 	"config-get",
 	"credential-get",
-	"function-fail",
-	"function-get",
-	"function-log",
-	"function-set",
 	"goal-state",
 	"is-leader",
 	"juju-log",
@@ -123,6 +118,9 @@ var expectedCommands = []string{
 	"relation-list",
 	"relation-set",
 	"resource-get",
+	"state-delete",
+	"state-get",
+	"state-set",
 	"status-get",
 	"status-set",
 	"storage-add",

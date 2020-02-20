@@ -13,7 +13,6 @@ import (
 	"github.com/juju/description"
 	"github.com/juju/errors"
 	"github.com/juju/loggo"
-	"github.com/juju/utils/featureflag"
 	"github.com/juju/version"
 	"gopkg.in/juju/charm.v6"
 	"gopkg.in/juju/names.v3"
@@ -27,7 +26,6 @@ import (
 	"github.com/juju/juju/core/permission"
 	"github.com/juju/juju/core/status"
 	"github.com/juju/juju/environs/config"
-	"github.com/juju/juju/feature"
 	"github.com/juju/juju/payload"
 	"github.com/juju/juju/state/cloudimagemetadata"
 	"github.com/juju/juju/storage"
@@ -50,15 +48,6 @@ func (ctrl *Controller) Import(model description.Model) (_ *Model, _ *State, err
 	} else if modelExists {
 		// We have an existing matching model.
 		return nil, nil, errors.AlreadyExistsf("model %s", modelUUID)
-	}
-
-	// Ensure that we only enable CMR migrations if the feature flag is enabled
-	// otherwise just error out as usual.
-	if !featureflag.Enabled(feature.CMRMigrations) && len(model.RemoteApplications()) != 0 {
-		// Cross-model relations are currently limited to models on
-		// the same controller, while migration is for getting the
-		// model to a new controller.
-		return nil, nil, errors.New("can't import models with remote applications")
 	}
 
 	// Unfortunately a version was released that exports v4 models
@@ -1133,6 +1122,14 @@ func (i *importer) unit(s description.Application, u description.Unit) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
+
+	// The assertion logic in unit.SetState assumes that the DocID is
+	// present.  Since the txn for creating the unit doc has completed
+	// without an error, we can safely populate the doc's model UUID and
+	// DocID.
+	udoc.ModelUUID = model.UUID()
+	udoc.DocID = ensureModelUUID(udoc.ModelUUID, udoc.Name)
+
 	unit := newUnit(i.st, model.Type(), udoc)
 	if annotations := u.Annotations(); len(annotations) > 0 {
 		if err := i.dbModel.SetAnnotations(unit, annotations); err != nil {
@@ -1148,7 +1145,11 @@ func (i *importer) unit(s description.Application, u description.Unit) error {
 	if err := i.importStatusHistory(unit.globalWorkloadVersionKey(), u.WorkloadVersionHistory()); err != nil {
 		return errors.Trace(err)
 	}
-
+	if unitState := u.State(); len(unitState) != 0 {
+		if err := unit.SetState(unitState); err != nil {
+			return errors.Trace(err)
+		}
+	}
 	if i.dbModel.Type() == ModelTypeIAAS {
 		if err := i.importUnitPayloads(unit, u.Payloads()); err != nil {
 			return errors.Trace(err)
@@ -1326,6 +1327,7 @@ func (i *importer) makeRemoteApplicationDoc(app description.RemoteApplication) *
 		SourceModelUUID: app.SourceModelTag().Id(),
 		IsConsumerProxy: app.IsConsumerProxy(),
 		Bindings:        app.Bindings(),
+		Macaroon:        app.Macaroon(),
 	}
 	descEndpoints := app.Endpoints()
 	eps := make([]remoteEndpointDoc, len(descEndpoints))

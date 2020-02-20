@@ -169,6 +169,22 @@ func (s *StateSuite) TestStrictLocalID(c *gc.C) {
 	c.Assert(err, jc.ErrorIsNil)
 }
 
+func (s *StateSuite) TestParseIDToTag(c *gc.C) {
+	model := "42c4f770-86ed-4fcc-8e39-697063d082bc:e"
+	machine := "42c4f770-86ed-4fcc-8e39-697063d082bc:m#0"
+	application := "c9741ea1-0c2a-444d-82f5-787583a48557:a#mysql"
+	unit := "c9741ea1-0c2a-444d-82f5-787583a48557:u#mysql/0"
+	moTag := state.ParseLocalIDToTags(model)
+	maTag := state.ParseLocalIDToTags(machine)
+	unTag := state.ParseLocalIDToTags(unit)
+	apTag := state.ParseLocalIDToTags(application)
+
+	c.Assert(moTag.String(), gc.Equals, "model-e")
+	c.Assert(maTag.String(), gc.Equals, "machine-m#0")
+	c.Assert(unTag.String(), gc.Equals, "unit-mysql-0")
+	c.Assert(apTag.String(), gc.Equals, "application-mysql")
+}
+
 func (s *StateSuite) TestStrictLocalIDWithWrongPrefix(c *gc.C) {
 	localID, err := state.StrictLocalID(s.State, "foo:wordpress")
 	c.Assert(localID, gc.Equals, "")
@@ -580,7 +596,11 @@ func (s *MultiModelStateSuite) TestWatchTwoModels(c *gc.C) {
 			triggerEvent: func(st *state.State) {
 				unit, err := st.Unit("dummy/0")
 				c.Assert(err, jc.ErrorIsNil)
-				_, err = unit.AddAction("snapshot", nil)
+				m, err := st.Model()
+				c.Assert(err, jc.ErrorIsNil)
+				operationID, err := m.EnqueueOperation("a test")
+				c.Assert(err, jc.ErrorIsNil)
+				_, err = unit.AddAction(operationID, "snapshot", nil)
 				c.Assert(err, jc.ErrorIsNil)
 			},
 		}, {
@@ -3218,6 +3238,9 @@ var findEntityTests = []findEntityTest{{
 	tag: names.NewActionTag("fedcba98-7654-4321-ba98-76543210beef"),
 	err: `action "fedcba98-7654-4321-ba98-76543210beef" not found`,
 }, {
+	tag: names.NewOperationTag("666"),
+	err: `operation "666" not found`,
+}, {
 	tag: names.NewUserTag("eric"),
 }, {
 	tag: names.NewUserTag("eric@local"),
@@ -3235,6 +3258,7 @@ var entityTypes = map[string]interface{}{
 	names.ControllerAgentTagKind: (*state.ControllerNodeInstance)(nil),
 	names.RelationTagKind:        (*state.Relation)(nil),
 	names.ActionTagKind:          (state.Action)(nil),
+	names.OperationTagKind:       (state.Operation)(nil),
 }
 
 func (s *StateSuite) TestFindEntity(c *gc.C) {
@@ -3246,7 +3270,9 @@ func (s *StateSuite) TestFindEntity(c *gc.C) {
 	app := s.AddTestingApplication(c, "ser-vice2", s.AddTestingCharm(c, "mysql"))
 	unit, err := app.AddUnit(state.AddUnitParams{})
 	c.Assert(err, jc.ErrorIsNil)
-	_, err = unit.AddAction("fakeaction", nil)
+	operationID, err := s.model.EnqueueOperation("something")
+	c.Assert(err, jc.ErrorIsNil)
+	_, err = unit.AddAction(operationID, "fakeaction", nil)
 	c.Assert(err, jc.ErrorIsNil)
 	s.Factory.MakeUser(c, &factory.UserParams{Name: "arble"})
 	c.Assert(err, jc.ErrorIsNil)
@@ -3325,7 +3351,9 @@ func (s *StateSuite) TestParseActionTag(c *gc.C) {
 	app := s.AddTestingApplication(c, "application2", s.AddTestingCharm(c, "dummy"))
 	u, err := app.AddUnit(state.AddUnitParams{})
 	c.Assert(err, jc.ErrorIsNil)
-	f, err := u.AddAction("snapshot", nil)
+	operationID, err := s.Model.EnqueueOperation("a test")
+	c.Assert(err, jc.ErrorIsNil)
+	f, err := u.AddAction(operationID, "snapshot", nil)
 	c.Assert(err, jc.ErrorIsNil)
 
 	action, err := s.model.Action(f.Id())

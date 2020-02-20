@@ -228,15 +228,26 @@ func (s *clientSuite) SetUpTest(c *gc.C) {
 				{Name: "summary.accessible", Val: true},
 			},
 		}},
-		"FakeVmFolder": {{
-			Obj: types.ManagedObjectReference{
-				Type:  "Folder",
-				Value: "FakeControllerVmFolder",
+		"FakeVmFolder": {
+			{
+				Obj: types.ManagedObjectReference{
+					Type:  "Folder",
+					Value: "FakeControllerVmFolder",
+				},
+				PropSet: []types.DynamicProperty{
+					{Name: "name", Val: "foo"},
+				},
 			},
-			PropSet: []types.DynamicProperty{
-				{Name: "name", Val: "foo"},
+			{
+				Obj: types.ManagedObjectReference{
+					Type:  "Folder",
+					Value: "FakeK8sVMFolder",
+				},
+				PropSet: []types.DynamicProperty{
+					{Name: "name", Val: "k8s"},
+				},
 			},
-		}},
+		},
 		"FakeControllerVmFolder": {{
 			Obj: types.ManagedObjectReference{
 				Type:  "Folder",
@@ -246,6 +257,7 @@ func (s *clientSuite) SetUpTest(c *gc.C) {
 				{Name: "name", Val: "bar"},
 			},
 		}},
+		"FakeK8sVMFolder": {},
 		"FakeModelVmFolder": {{
 			Obj: types.ManagedObjectReference{
 				Type:  "VirtualMachine",
@@ -633,11 +645,13 @@ func (s *clientSuite) TestDestroyVMFolderRace(c *gc.C) {
 
 func (s *clientSuite) TestEnsureVMFolder(c *gc.C) {
 	client := s.newFakeClient(&s.roundTripper, "dc0")
-	folder, err := client.EnsureVMFolder(context.Background(), "foo/bar")
+	folder, err := client.EnsureVMFolder(context.Background(), "", "foo/bar")
 	c.Assert(err, jc.ErrorIsNil)
 	c.Assert(folder, gc.NotNil)
 
 	s.roundTripper.CheckCalls(c, []testing.StubCall{
+		retrievePropertiesStubCall("FakeRootFolder"),
+		retrievePropertiesStubCall("FakeRootFolder"),
 		retrievePropertiesStubCall("FakeRootFolder"),
 		retrievePropertiesStubCall("FakeRootFolder"),
 		retrievePropertiesStubCall("FakeDatacenter"),
@@ -659,6 +673,9 @@ func (s *clientSuite) TestMoveVMFolderInto(c *gc.C) {
 		retrievePropertiesStubCall("FakeDatacenter"),
 		retrievePropertiesStubCall("FakeVmFolder"),
 		retrievePropertiesStubCall("FakeHostFolder"),
+		retrievePropertiesStubCall("FakeRootFolder"),
+		retrievePropertiesStubCall("FakeRootFolder"),
+		retrievePropertiesStubCall("FakeDatacenter"),
 		retrievePropertiesStubCall("FakeRootFolder"),
 		retrievePropertiesStubCall("FakeDatacenter"),
 		retrievePropertiesStubCall("FakeVmFolder"),

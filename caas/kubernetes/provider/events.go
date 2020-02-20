@@ -9,6 +9,7 @@ import (
 	core "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/client-go/informers"
 
 	"github.com/juju/juju/core/watcher"
 )
@@ -49,8 +50,7 @@ func (k *kubernetesClient) getEvents(objName string, objKind string) ([]core.Eve
 	).String()
 	logger.Debugf("getting the latest event for %q", selector)
 	eventList, err := k.client().CoreV1().Events(k.namespace).List(v1.ListOptions{
-		IncludeUninitialized: true,
-		FieldSelector:        selector,
+		FieldSelector: selector,
 	})
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -59,17 +59,14 @@ func (k *kubernetesClient) getEvents(objName string, objKind string) ([]core.Eve
 }
 
 func (k *kubernetesClient) watchEvents(objName string, objKind string) (watcher.NotifyWatcher, error) {
-	selector := fields.AndSelectors(
-		fields.OneTermEqualSelector("involvedObject.name", objName),
-		fields.OneTermEqualSelector("involvedObject.kind", objKind),
-	).String()
-	events := k.client().CoreV1().Events(k.namespace)
-	w, err := events.Watch(v1.ListOptions{
-		FieldSelector: selector,
-		Watch:         true,
-	})
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return k.newWatcher(w, objName, k.clock)
+	factory := informers.NewSharedInformerFactoryWithOptions(k.client(), 0,
+		informers.WithNamespace(k.namespace),
+		informers.WithTweakListOptions(func(o *v1.ListOptions) {
+			o.FieldSelector = fields.AndSelectors(
+				fields.OneTermEqualSelector("involvedObject.name", objName),
+				fields.OneTermEqualSelector("involvedObject.kind", objKind),
+			).String()
+		}),
+	)
+	return k.newWatcher(factory.Core().V1().Events().Informer(), objName, k.clock)
 }

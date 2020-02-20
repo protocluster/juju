@@ -9,6 +9,7 @@ import (
 
 	"github.com/golang/mock/gomock"
 	jujuclock "github.com/juju/clock"
+	"github.com/juju/errors"
 	jc "github.com/juju/testing/checkers"
 	gc "gopkg.in/check.v1"
 	"gopkg.in/juju/worker.v1/workertest"
@@ -18,7 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/tools/cache"
 
 	"github.com/juju/juju/api"
 	"github.com/juju/juju/apiserver/params"
@@ -123,7 +124,7 @@ func (s *bootstrapSuite) TestControllerCorelation(c *gc.C) {
 	})
 
 	gomock.InOrder(
-		s.mockNamespaces.EXPECT().List(v1.ListOptions{IncludeUninitialized: true}).
+		s.mockNamespaces.EXPECT().List(v1.ListOptions{}).
 			Return(&core.NamespaceList{Items: []core.Namespace{existingNs}}, nil),
 	)
 	var err error
@@ -186,17 +187,10 @@ func (s *bootstrapSuite) TestBootstrap(c *gc.C) {
 	// Eventually the namespace wil be set to controllerName.
 	// So we have to specify the final namespace(controllerName) for later use.
 	newK8sRestClientFunc := s.setupK8sRestClient(c, ctrl, s.pcfg.ControllerName)
-	newK8sWatcherForTest := func(wi watch.Interface, name string, clock jujuclock.Clock) (*provider.KubernetesNotifyWatcher, error) {
-		w, err := provider.NewKubernetesNotifyWatcher(wi, name, clock)
-		c.Assert(err, jc.ErrorIsNil)
-		<-w.Changes() // Consume initial event for testing.
-		s.watchers = append(s.watchers, w)
-		return w, err
-	}
 	randomPrefixFunc := func() (string, error) {
 		return "appuuid", nil
 	}
-	s.setupBroker(c, ctrl, newK8sRestClientFunc, newK8sWatcherForTest, randomPrefixFunc)
+	s.setupBroker(c, ctrl, newK8sRestClientFunc, randomPrefixFunc)
 	// Broker's namespace is "controller" now - controllerModelConfig.Name()
 	c.Assert(s.broker.GetCurrentNamespace(), jc.DeepEquals, "controller")
 	c.Assert(
@@ -615,8 +609,6 @@ $JUJU_TOOLS_DIR/jujud machine --data-dir $JUJU_DATA_DIR --controller-id 0 --log-
 		},
 	}
 
-	podWatcher := s.k8sNewFakeWatcher()
-	eventWatcher := s.k8sNewFakeWatcher()
 	eventsPartial := &core.EventList{
 		Items: []core.Event{
 			{
@@ -635,6 +627,7 @@ $JUJU_TOOLS_DIR/jujud machine --data-dir $JUJU_DATA_DIR --controller-id 0 --log-
 			},
 		},
 	}
+
 	eventsDone := &core.EventList{
 		Items: []core.Event{
 			{
@@ -666,13 +659,29 @@ $JUJU_TOOLS_DIR/jujud machine --data-dir $JUJU_DATA_DIR --controller-id 0 --log-
 		},
 	}
 
+	podWatcher, podFirer := newKubernetesTestWatcher()
+	eventWatcher, eventFirer := newKubernetesTestWatcher()
+	<-podWatcher.Changes()
+	<-eventWatcher.Changes()
+	watchers := []provider.KubernetesNotifyWatcher{podWatcher, eventWatcher}
+	watchCallCount := 0
+
+	s.k8sWatcherFn = provider.NewK8sWatcherFunc(func(_ cache.SharedIndexInformer, n string, _ jujuclock.Clock) (provider.KubernetesNotifyWatcher, error) {
+		if watchCallCount >= len(watchers) {
+			return nil, errors.NotFoundf("no watcher available for index %d", watchCallCount)
+		}
+		w := watchers[watchCallCount]
+		watchCallCount++
+		return w, nil
+	})
+
 	gomock.InOrder(
 		// create namespace.
 		s.mockNamespaces.EXPECT().Create(ns).
 			Return(ns, nil),
 
 		// ensure service
-		s.mockServices.EXPECT().Get("juju-controller-test-service", v1.GetOptions{IncludeUninitialized: true}).
+		s.mockServices.EXPECT().Get("juju-controller-test-service", v1.GetOptions{}).
 			Return(nil, s.k8sNotFoundError()),
 		s.mockServices.EXPECT().Update(svcNotProvisioned).
 			Return(nil, s.k8sNotFoundError()),
@@ -680,63 +689,63 @@ $JUJU_TOOLS_DIR/jujud machine --data-dir $JUJU_DATA_DIR --controller-id 0 --log-
 			Return(svcNotProvisioned, nil),
 
 		// below calls are for GetService - 1st address no provisioned yet.
-		s.mockServices.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==juju-controller-test", IncludeUninitialized: true}).
+		s.mockServices.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==juju-controller-test"}).
 			Return(&core.ServiceList{Items: []core.Service{*svcNotProvisioned}}, nil),
-		s.mockStatefulSets.EXPECT().Get("juju-operator-juju-controller-test", v1.GetOptions{IncludeUninitialized: true}).
+		s.mockStatefulSets.EXPECT().Get("juju-operator-juju-controller-test", v1.GetOptions{}).
 			Return(nil, s.k8sNotFoundError()),
-		s.mockStatefulSets.EXPECT().Get("juju-controller-test", v1.GetOptions{IncludeUninitialized: false}).
+		s.mockStatefulSets.EXPECT().Get("juju-controller-test", v1.GetOptions{}).
 			Return(nil, s.k8sNotFoundError()),
-		s.mockDeployments.EXPECT().Get("juju-controller-test", v1.GetOptions{IncludeUninitialized: false}).
+		s.mockDeployments.EXPECT().Get("juju-controller-test", v1.GetOptions{}).
 			Return(nil, s.k8sNotFoundError()),
 
 		// below calls are for GetService - 2nd address is ready.
-		s.mockServices.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==juju-controller-test", IncludeUninitialized: true}).
+		s.mockServices.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==juju-controller-test"}).
 			Return(&core.ServiceList{Items: []core.Service{*svcProvisioned}}, nil),
-		s.mockStatefulSets.EXPECT().Get("juju-operator-juju-controller-test", v1.GetOptions{IncludeUninitialized: true}).
+		s.mockStatefulSets.EXPECT().Get("juju-operator-juju-controller-test", v1.GetOptions{}).
 			Return(nil, s.k8sNotFoundError()),
-		s.mockStatefulSets.EXPECT().Get("juju-controller-test", v1.GetOptions{IncludeUninitialized: false}).
+		s.mockStatefulSets.EXPECT().Get("juju-controller-test", v1.GetOptions{}).
 			Return(nil, s.k8sNotFoundError()),
-		s.mockDeployments.EXPECT().Get("juju-controller-test", v1.GetOptions{IncludeUninitialized: false}).
+		s.mockDeployments.EXPECT().Get("juju-controller-test", v1.GetOptions{}).
 			Return(nil, s.k8sNotFoundError()),
 
 		// ensure shared-secret secret.
-		s.mockSecrets.EXPECT().Get("juju-controller-test-secret", v1.GetOptions{IncludeUninitialized: true}).AnyTimes().
+		s.mockSecrets.EXPECT().Get("juju-controller-test-secret", v1.GetOptions{}).AnyTimes().
 			Return(nil, s.k8sNotFoundError()),
 		s.mockSecrets.EXPECT().Create(emptySecret).AnyTimes().
 			Return(emptySecret, nil),
-		s.mockSecrets.EXPECT().Get("juju-controller-test-secret", v1.GetOptions{IncludeUninitialized: true}).AnyTimes().
+		s.mockSecrets.EXPECT().Get("juju-controller-test-secret", v1.GetOptions{}).AnyTimes().
 			Return(emptySecret, nil),
 		s.mockSecrets.EXPECT().Update(secretWithSharedSecretAdded).AnyTimes().
 			Return(secretWithSharedSecretAdded, nil),
 
 		// ensure server.pem secret.
-		s.mockSecrets.EXPECT().Get("juju-controller-test-secret", v1.GetOptions{IncludeUninitialized: true}).AnyTimes().
+		s.mockSecrets.EXPECT().Get("juju-controller-test-secret", v1.GetOptions{}).AnyTimes().
 			Return(secretWithSharedSecretAdded, nil),
 		s.mockSecrets.EXPECT().Update(secretWithServerPEMAdded).AnyTimes().
 			Return(secretWithServerPEMAdded, nil),
 
 		// initialize the empty configmap.
-		s.mockConfigMaps.EXPECT().Get("juju-controller-test-configmap", v1.GetOptions{IncludeUninitialized: true}).AnyTimes().
+		s.mockConfigMaps.EXPECT().Get("juju-controller-test-configmap", v1.GetOptions{}).AnyTimes().
 			Return(nil, s.k8sNotFoundError()),
 		s.mockConfigMaps.EXPECT().Create(emptyConfigMap).AnyTimes().
 			Return(emptyConfigMap, nil),
 
 		// ensure bootstrap-params configmap.
-		s.mockConfigMaps.EXPECT().Get("juju-controller-test-configmap", v1.GetOptions{IncludeUninitialized: true}).AnyTimes().
+		s.mockConfigMaps.EXPECT().Get("juju-controller-test-configmap", v1.GetOptions{}).AnyTimes().
 			Return(emptyConfigMap, nil),
 		s.mockConfigMaps.EXPECT().Create(configMapWithBootstrapParamsAdded).AnyTimes().
 			Return(nil, s.k8sAlreadyExistsError()),
-		s.mockConfigMaps.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==juju-controller-test", IncludeUninitialized: true}).
+		s.mockConfigMaps.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==juju-controller-test"}).
 			Return(&core.ConfigMapList{Items: []core.ConfigMap{*emptyConfigMap}}, nil),
 		s.mockConfigMaps.EXPECT().Update(configMapWithBootstrapParamsAdded).AnyTimes().
 			Return(configMapWithBootstrapParamsAdded, nil),
 
 		// ensure agent.conf configmap.
-		s.mockConfigMaps.EXPECT().Get("juju-controller-test-configmap", v1.GetOptions{IncludeUninitialized: true}).AnyTimes().
+		s.mockConfigMaps.EXPECT().Get("juju-controller-test-configmap", v1.GetOptions{}).AnyTimes().
 			Return(configMapWithBootstrapParamsAdded, nil),
 		s.mockConfigMaps.EXPECT().Create(configMapWithAgentConfAdded).AnyTimes().
 			Return(nil, s.k8sAlreadyExistsError()),
-		s.mockConfigMaps.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==juju-controller-test", IncludeUninitialized: true}).
+		s.mockConfigMaps.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==juju-controller-test"}).
 			Return(&core.ConfigMapList{Items: []core.ConfigMap{*configMapWithBootstrapParamsAdded}}, nil),
 		s.mockConfigMaps.EXPECT().Update(configMapWithAgentConfAdded).AnyTimes().
 			Return(configMapWithAgentConfAdded, nil),
@@ -749,55 +758,28 @@ $JUJU_TOOLS_DIR/jujud machine --data-dir $JUJU_DATA_DIR --controller-id 0 --log-
 		s.mockStorageClass.EXPECT().Get("some-storage", v1.GetOptions{}).
 			Return(&sc, nil),
 
-		// ensure statefulset.
-		s.mockPods.EXPECT().Watch(
-			v1.ListOptions{
-				LabelSelector:        "juju-app==juju-controller-test",
-				Watch:                true,
-				IncludeUninitialized: true,
-			},
-		).
-			Return(podWatcher, nil),
 		s.mockStatefulSets.EXPECT().Create(statefulSetSpec).
-			Return(statefulSetSpec, nil),
-		s.mockEvents.EXPECT().Watch(
-			v1.ListOptions{
-				FieldSelector: "involvedObject.name=controller-0,involvedObject.kind=Pod",
-				Watch:         true,
-			},
-		).
-			Return(eventWatcher, nil),
-		s.mockEvents.EXPECT().List(
-			v1.ListOptions{
-				IncludeUninitialized: true,
-				FieldSelector:        "involvedObject.name=controller-0,involvedObject.kind=Pod",
-			},
-		).
-			DoAndReturn(func(...interface{}) (*core.EventList, error) {
-				eventWatcher.Action(provider.StartedContainer, nil)
-				s.clock.WaitAdvance(time.Second, testing.ShortWait, 2)
-				return eventsPartial, nil
+			DoAndReturn(func(_ interface{}) (*apps.StatefulSet, error) {
+				eventFirer()
+				return statefulSetSpec, nil
 			}),
 
 		s.mockEvents.EXPECT().List(
-			v1.ListOptions{
-				IncludeUninitialized: true,
-				FieldSelector:        "involvedObject.name=controller-0,involvedObject.kind=Pod",
-			},
-		).
-			DoAndReturn(func(...interface{}) (*core.EventList, error) {
-				podWatcher.Action("PodStarted", nil)
-				s.clock.WaitAdvance(time.Second, testing.ShortWait, 2)
-				return eventsDone, nil
-			}),
+			listOptionsFieldSelectorMatcher("involvedObject.name=controller-0,involvedObject.kind=Pod"),
+		).Return(&core.EventList{}, nil),
+
 		s.mockEvents.EXPECT().List(
-			v1.ListOptions{
-				IncludeUninitialized: true,
-				FieldSelector:        "involvedObject.name=controller-0,involvedObject.kind=Pod",
-			},
-		).
-			Return(eventsDone, nil),
-		s.mockPods.EXPECT().Get("controller-0", v1.GetOptions{IncludeUninitialized: true}).
+			listOptionsFieldSelectorMatcher("involvedObject.name=controller-0,involvedObject.kind=Pod"),
+		).DoAndReturn(func(...interface{}) (*core.EventList, error) {
+			podFirer()
+			return eventsPartial, nil
+		}),
+
+		s.mockEvents.EXPECT().List(
+			listOptionsFieldSelectorMatcher("involvedObject.name=controller-0,involvedObject.kind=Pod"),
+		).Return(eventsDone, nil),
+
+		s.mockPods.EXPECT().Get("controller-0", v1.GetOptions{}).
 			Return(podReady, nil),
 	)
 
@@ -815,8 +797,6 @@ $JUJU_TOOLS_DIR/jujud machine --data-dir $JUJU_DATA_DIR --controller-id 0 --log-
 		c.Assert(s.watchers, gc.HasLen, 2)
 		c.Assert(workertest.CheckKilled(c, s.watchers[0]), jc.ErrorIsNil)
 		c.Assert(workertest.CheckKilled(c, s.watchers[1]), jc.ErrorIsNil)
-		c.Assert(podWatcher.IsStopped(), jc.IsTrue)
-		c.Assert(eventWatcher.IsStopped(), jc.IsTrue)
 	case <-time.After(testing.LongWait):
 		c.Fatalf("timed out waiting for deploy return")
 	}

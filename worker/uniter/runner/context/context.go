@@ -114,9 +114,32 @@ type HookProcess interface {
 	Kill() error
 }
 
+//go:generate mockgen -package mocks -destination mocks/hookunit_mock.go github.com/juju/juju/worker/uniter/runner/context HookUnit
+
+// HookUnit represents the functions needed by a unit in a hook context to
+// call into state.
+type HookUnit interface {
+	AddStorage(constraints map[string][]params.StorageConstraints) error
+	Application() (*uniter.Application, error)
+	ApplicationName() string
+	ClosePorts(protocol string, fromPort, toPort int) error
+	ConfigSettings() (charm.Settings, error)
+	LogActionMessage(names.ActionTag, string) error
+	Name() string
+	NetworkInfo(bindings []string, relationId *int) (map[string]params.NetworkInfoResult, error)
+	OpenPorts(protocol string, fromPort, toPort int) error
+	RequestReboot() error
+	SetState(map[string]string) error
+	SetUnitStatus(unitStatus status.Status, info string, data map[string]interface{}) error
+	State() (map[string]string, error)
+	Tag() names.UnitTag
+	UnitStatus() (params.StatusResult, error)
+	UpdateNetworkInfo() error
+}
+
 // HookContext is the implementation of runner.Context.
 type HookContext struct {
-	unit *uniter.Unit
+	unit HookUnit
 
 	// state is the handle to the uniter State so that HookContext can make
 	// API calls on the state.
@@ -150,6 +173,8 @@ type HookContext struct {
 
 	// id identifies the context.
 	id string
+
+	hookName string
 
 	// actionData contains the values relevant to the run of an Action:
 	// its tag, its parameters, and its results.
@@ -258,7 +283,107 @@ type HookContext struct {
 	// podSpecYaml is the pending pod spec to be committed.
 	podSpecYaml *string
 
+	// A cached view of the unit's state that gets persisted by juju once
+	// the context is flushed.
+	cacheValues map[string]string
+
+	// A flag that keeps track of whether the unit's state has been mutated.
+	cacheDirty bool
+
 	mu sync.Mutex
+}
+
+// GetCache returns a copy of the cache.
+// Implements jujuc.HookContext.unitCacheContext, part of runner.Context.
+func (ctx *HookContext) GetCache() (map[string]string, error) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	if err := ctx.ensureStateValuesLoaded(); err != nil {
+		return nil, err
+	}
+
+	if len(ctx.cacheValues) == 0 {
+		return nil, nil
+	}
+
+	retVal := make(map[string]string, len(ctx.cacheValues))
+	for k, v := range ctx.cacheValues {
+		retVal[k] = v
+	}
+	return retVal, nil
+}
+
+// GetSingleCacheValue returns the value of the given key.
+// Implements jujuc.HookContext.unitCacheContext, part of runner.Context.
+func (ctx *HookContext) GetSingleCacheValue(key string) (string, error) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	if err := ctx.ensureStateValuesLoaded(); err != nil {
+		return "", err
+	}
+
+	value, ok := ctx.cacheValues[key]
+	if !ok {
+		return "", errors.NotFoundf("%q", key)
+	}
+	return value, nil
+}
+
+// SetCacheValue sets the key/value pair provided in the cache.
+// Implements jujuc.HookContext.unitCacheContext, part of runner.Context.
+func (ctx *HookContext) SetCacheValue(key, value string) error {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	if err := ctx.ensureStateValuesLoaded(); err != nil {
+		return err
+	}
+
+	curValue, exists := ctx.cacheValues[key]
+	if exists && curValue == value {
+		return nil // no-op
+	}
+
+	ctx.cacheValues[key] = value
+	ctx.cacheDirty = true
+	return nil
+}
+
+// DeleteCacheValue deletes the key/value pair for the given key from
+// the cache.
+// Implements jujuc.HookContext.unitCacheContext, part of runner.Context.
+func (ctx *HookContext) DeleteCacheValue(key string) error {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	if err := ctx.ensureStateValuesLoaded(); err != nil {
+		return err
+	}
+
+	if _, exists := ctx.cacheValues[key]; !exists {
+		return nil // no-op
+	}
+
+	delete(ctx.cacheValues, key)
+	ctx.cacheDirty = true
+	return nil
+}
+
+// ensureStateValuesLoaded retrieves and caches the unit's state from the
+// controller. The caller of this method must be holding the ctx mutex.
+func (ctx *HookContext) ensureStateValuesLoaded() error {
+	// NOTE: Assuming lock to be held!
+	if ctx.cacheValues != nil {
+		return nil
+	}
+
+	// Load from controller
+	state, err := ctx.unit.State()
+	if err != nil {
+		return errors.Annotate(err, "loading unit state from database")
+	} else if state == nil {
+		state = make(map[string]string)
+	}
+	ctx.cacheValues = state
+	return nil
 }
 
 // Component returns the ContextComponent with the supplied name if
@@ -770,6 +895,7 @@ func (ctx *HookContext) HookVars(paths Paths, remote bool) ([]string, error) {
 		"CHARM_DIR="+paths.GetCharmDir(), // legacy, embarrassing
 		"JUJU_CHARM_DIR="+paths.GetCharmDir(),
 		"JUJU_CONTEXT_ID="+ctx.id,
+		"JUJU_HOOK_NAME="+ctx.hookName,
 		"JUJU_AGENT_SOCKET_ADDRESS="+paths.GetJujucClientSocket(remote).Address,
 		"JUJU_AGENT_SOCKET_NETWORK="+paths.GetJujucClientSocket(remote).Network,
 		"JUJU_UNIT_NAME="+ctx.unitName,
@@ -813,11 +939,6 @@ func (ctx *HookContext) HookVars(paths Paths, remote bool) ([]string, error) {
 	}
 	if ctx.actionData != nil {
 		vars = append(vars,
-			"JUJU_FUNCTION_NAME="+ctx.actionData.Name,
-			"JUJU_FUNCTION_ID="+ctx.actionData.Tag.Id(),
-			"JUJU_FUNCTION_TAG="+ctx.actionData.Tag.String(),
-
-			// TODO(ycliuhw): remove here once action is deprecated.
 			"JUJU_ACTION_NAME="+ctx.actionData.Name,
 			"JUJU_ACTION_UUID="+ctx.actionData.Tag.Id(),
 			"JUJU_ACTION_TAG="+ctx.actionData.Tag.String(),
@@ -890,6 +1011,16 @@ func (ctx *HookContext) Flush(process string, ctxErr error) (err error) {
 		if e := ctx.unit.UpdateNetworkInfo(); e != nil {
 			return errors.Trace(e)
 		}
+	}
+
+	// Local cache changes will only be persisted if the actual cached
+	// contents have been modified.
+	if ctx.cacheDirty && writeChanges {
+		if e := ctx.unit.SetState(ctx.cacheValues); e != nil {
+			return errors.Trace(e)
+		}
+
+		ctx.cacheDirty = false
 	}
 
 	for id, rctx := range ctx.relations {

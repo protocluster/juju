@@ -34,22 +34,22 @@ var validLeader = regexp.MustCompile("^" + leaderSnippet + "$")
 // nameRule describes the name format of an action or keyName must match to be valid.
 var nameRule = charm.GetActionNameRule()
 
-func NewCallCommand() cmd.Command {
-	return modelcmd.Wrap(&callCommand{
+func NewRunCommand() cmd.Command {
+	return modelcmd.Wrap(&runCommand{
 		logMessageHandler: func(ctx *cmd.Context, msg string) {
 			fmt.Fprintln(ctx.Stderr, msg)
 		},
 	})
 }
 
-// callCommand enqueues an Action for running on the given unit with given
+// runCommand enqueues an Action for running on the given unit with given
 // params
-type callCommand struct {
+type runCommand struct {
 	ActionCommandBase
 	api               APIClient
 	unitReceivers     []string
 	leaders           map[string]string
-	functionName      string
+	actionName        string
 	paramsYAML        cmd.FileVar
 	parseStrings      bool
 	background        bool
@@ -60,17 +60,23 @@ type callCommand struct {
 	logMessageHandler func(*cmd.Context, string)
 }
 
-const callDoc = `
-Run a charm function for execution on a given unit, with a given set of params.
+const runDoc = `
+Run a charm action for execution on the given unit(s), with a given set of params.
 An ID is returned for use with 'juju show-operation <ID>'.
 
-To queue a function to be run in the background without waiting for it to finish,
+A action executed on a given unit becomes a task with an ID that can be
+used with 'juju show-task <ID>'.
+
+Running an action returns the overall operation ID as well as the individual
+task ID(s) for each unit.
+
+To queue a action to be run in the background without waiting for it to finish,
 use the --background option.
 
-To set the maximum time to wait for a function to complete, use the --max-wait option.
+To set the maximum time to wait for a action to complete, use the --max-wait option.
 
-By default, the output of a single function will just be that function's stdout.
-For multiple functions, each function stdout is printed with the function id.
+By default, the output of a single action will just be that action's stdout.
+For multiple actions, each action stdout is printed with the action id.
 To see more detailed information about run timings etc, use --format yaml.
 
 Valid unit identifiers are: 
@@ -78,10 +84,10 @@ Valid unit identifiers are:
   leader syntax of the form <application>/leader, such as mysql/leader.
 
 If the leader syntax is used, the leader unit for the application will be
-resolved before the function is enqueued.
+resolved before the action is enqueued.
 
 Params are validated according to the charm for the unit's application.  The
-valid params can be seen using "juju functions <application> --schema".
+valid params can be seen using "juju actions <application> --schema".
 Params may be in a yaml file which is passed with the --params option, or they
 may be specified by a key.key.key...=value format (see examples below.)
 
@@ -94,26 +100,28 @@ explicit arguments will override the parameter file.
 
 Examples:
 
-    juju call mysql/3 backup --background
-    juju call mysql/3 backup --max-wait=2m
-    juju call mysql/3 backup --format yaml
-    juju call mysql/3 backup --utc
-    juju call mysql/3 backup
-    juju call mysql/leader backup
+    juju run mysql/3 backup --background
+    juju run mysql/3 backup --max-wait=2m
+    juju run mysql/3 backup --format yaml
+    juju run mysql/3 backup --utc
+    juju run mysql/3 backup
+    juju run mysql/leader backup
     juju show-operation <ID>
-    juju call mysql/3 backup --params parameters.yml
-    juju call mysql/3 backup out=out.tar.bz2 file.kind=xz file.quality=high
-    juju call mysql/3 backup --params p.yml file.kind=xz file.quality=high
-    juju call sleeper/0 pause time=1000
-    juju call sleeper/0 pause --string-args time=1000
+    juju run mysql/3 backup --params parameters.yml
+    juju run mysql/3 backup out=out.tar.bz2 file.kind=xz file.quality=high
+    juju run mysql/3 backup --params p.yml file.kind=xz file.quality=high
+    juju run sleeper/0 pause time=1000
+    juju run sleeper/0 pause --string-args time=1000
 
 See also:
     list-operations
+    list-tasks
     show-operation
+    show-task
 `
 
 // SetFlags offers an option for YAML output.
-func (c *callCommand) SetFlags(f *gnuflag.FlagSet) {
+func (c *runCommand) SetFlags(f *gnuflag.FlagSet) {
 	c.ActionCommandBase.SetFlags(f)
 	c.out.AddFlags(f, "plain", map[string]cmd.Formatter{
 		"yaml":  cmd.FormatYaml,
@@ -123,37 +131,37 @@ func (c *callCommand) SetFlags(f *gnuflag.FlagSet) {
 
 	f.Var(&c.paramsYAML, "params", "Path to yaml-formatted params file")
 	f.BoolVar(&c.parseStrings, "string-args", false, "Use raw string values of CLI args")
-	f.BoolVar(&c.background, "background", false, "Run the function in the background")
-	f.DurationVar(&c.maxWait, "max-wait", 0, "Maximum wait time for a function to complete")
+	f.BoolVar(&c.background, "background", false, "Run the action in the background")
+	f.DurationVar(&c.maxWait, "max-wait", 0, "Maximum wait time for a action to complete")
 	f.BoolVar(&c.utc, "utc", false, "Show times in UTC")
 }
 
-func (c *callCommand) Info() *cmd.Info {
+func (c *runCommand) Info() *cmd.Info {
 	return jujucmd.Info(&cmd.Info{
-		Name:    "call",
+		Name:    "run",
 		Args:    "<unit> [<unit> ...] <action name> [key.key.key...=value]",
-		Purpose: "Run a function on a specified unit.",
-		Doc:     callDoc,
+		Purpose: "Run a action on a specified unit.",
+		Doc:     runDoc,
 	})
 }
 
 // Init gets the unit tag(s), action name and action arguments.
-func (c *callCommand) Init(args []string) (err error) {
+func (c *runCommand) Init(args []string) (err error) {
 	for _, arg := range args {
 		if names.IsValidUnit(arg) || validLeader.MatchString(arg) {
 			c.unitReceivers = append(c.unitReceivers, arg)
 		} else if nameRule.MatchString(arg) {
-			c.functionName = arg
+			c.actionName = arg
 			break
 		} else {
-			return errors.Errorf("invalid unit or function name %q", arg)
+			return errors.Errorf("invalid unit or action name %q", arg)
 		}
 	}
 	if len(c.unitReceivers) == 0 {
 		return errors.New("no unit specified")
 	}
-	if c.functionName == "" {
-		return errors.New("no function specified")
+	if c.actionName == "" {
+		return errors.New("no action specified")
 	}
 
 	if c.background && c.maxWait > 0 {
@@ -183,53 +191,69 @@ func (c *callCommand) Init(args []string) (err error) {
 	return nil
 }
 
-func (c *callCommand) Run(ctx *cmd.Context) error {
+func (c *runCommand) Run(ctx *cmd.Context) error {
 	if err := c.ensureAPI(); err != nil {
 		return errors.Trace(err)
 	}
 	defer c.api.Close()
 
-	results, err := c.enqueueActions(ctx)
+	// juju run action is behind a feature flag so we are
+	// free to not support running against an older controller
+	if c.api.BestAPIVersion() < 6 {
+		return errors.Errorf("juju run action not supported on this version of Juju")
+	}
+
+	operationId, results, err := c.enqueueActions(ctx)
 	if err != nil {
 		return errors.Trace(err)
 	}
+	numTasks := len(results)
+	if !c.background {
+		var plural string
+		if numTasks > 1 {
+			plural = "s"
+		}
+		ctx.Infof("Running operation %s with %d task%s", operationId, numTasks, plural)
+	}
 
 	var actionTag names.ActionTag
-	info := make(map[string]interface{}, len(results.Results))
-	for _, result := range results.Results {
-		if result.Error != nil {
-			return result.Error
+	info := make(map[string]interface{}, numTasks)
+	for i, result := range results {
+		if result.err != nil {
+			return result.err
 		}
-		if result.Action == nil {
-			return errors.Errorf("operation failed to enqueue on %q", result.Action.Receiver)
+		if result.task == "" {
+			return errors.Errorf("operation failed to enqueue on %q", result.receiver)
 		}
-		if actionTag, err = names.ParseActionTag(result.Action.Tag); err != nil {
+		if actionTag, err = names.ParseActionTag(result.task); err != nil {
 			return err
 		}
 
 		if !c.background {
-			ctx.Infof("Running Operation %s", actionTag.Id())
+			ctx.Infof("  - task %s on %s", actionTag.Id(), c.unitReceivers[i])
 		}
-		unitTag, err := names.ParseUnitTag(result.Action.Receiver)
-		if err != nil {
-			return err
-		}
-		info[unitTag.Id()] = map[string]string{
+		info[result.receiver] = map[string]string{
 			"id": actionTag.Id(),
 		}
 	}
+	ctx.Infof("")
 	if c.background {
-		if len(results.Results) == 1 {
-			ctx.Infof("Scheduled Operation %s", actionTag.Id())
-			ctx.Infof("Check status with 'juju show-operation %s'", actionTag.Id())
+		if numTasks == 1 {
+			ctx.Infof("Scheduled operation %s with task %s", operationId, actionTag.Id())
+			ctx.Infof("Check operation status with 'juju show-operation %s'", operationId)
+			ctx.Infof("Check task status with 'juju show-task %s'", actionTag.Id())
 		} else {
-			ctx.Infof("Scheduled Operations:")
+			ctx.Infof("Scheduled operation %s with %d tasks", operationId, numTasks)
 			cmd.FormatYaml(ctx.Stderr, info)
-			ctx.Infof("Check status with 'juju show-operation <id>'")
+			ctx.Infof("Check operation status with 'juju show-operation %s'", operationId)
+			ctx.Infof("Check task status with 'juju show-task <id>'")
 		}
 		return nil
 	}
+	return c.waitForTasks(ctx, results, info)
+}
 
+func (c *runCommand) waitForTasks(ctx *cmd.Context, tasks []enqueuedAction, info map[string]interface{}) error {
 	var wait *time.Timer
 	if c.maxWait < 0 {
 		// Indefinite wait. Discard the tick.
@@ -242,7 +266,11 @@ func (c *callCommand) Run(ctx *cmd.Context) error {
 	actionDone := make(chan struct{})
 	var logsWatcher watcher.StringsWatcher
 	haveLogs := false
-	if len(results.Results) == 1 && c.api.BestAPIVersion() >= 5 {
+	if len(tasks) == 1 {
+		actionTag, err := names.ParseActionTag(tasks[0].task)
+		if err != nil {
+			return err
+		}
 		logsWatcher, err = c.api.WatchActionProgress(actionTag.Id())
 		if err != nil {
 			return errors.Trace(err)
@@ -260,14 +288,14 @@ func (c *callCommand) Run(ctx *cmd.Context) error {
 		}
 	}
 
-	for i, result := range results.Results {
-		tag, err := names.ParseActionTag(result.Action.Tag)
+	for i, result := range tasks {
+		tag, err := names.ParseActionTag(result.task)
 		if err != nil {
 			waitForWatcher()
 			return errors.Trace(err)
 		}
-		fmt.Fprintf(ctx.Stderr, "Waiting for operation %v...\n", tag.Id())
-		result, err = GetActionResult(c.api, tag.Id(), wait, false)
+		fmt.Fprintf(ctx.Stderr, "Waiting for task %v...\n", tag.Id())
+		actionResult, err := GetActionResult(c.api, tag.Id(), wait, false)
 		if i == 0 {
 			waitForWatcher()
 			if haveLogs {
@@ -278,39 +306,41 @@ func (c *callCommand) Run(ctx *cmd.Context) error {
 		if err != nil {
 			return errors.Trace(err)
 		}
-		unitTag, err := names.ParseUnitTag(result.Action.Receiver)
-		if err != nil {
-			return err
-		}
-		d := FormatActionResult(result, c.utc, false)
+		d := FormatActionResult(actionResult, c.utc, false)
 		d["id"] = tag.Id() // Action ID is required in case we timed out.
-		info[unitTag.Id()] = d
+		info[result.receiver] = d
 	}
 
 	return c.out.Write(ctx, info)
 }
 
-func (c *callCommand) enqueueActions(ctx *cmd.Context) (*params.ActionResults, error) {
+type enqueuedAction struct {
+	task     string
+	receiver string
+	err      error
+}
+
+func (c *runCommand) enqueueActions(ctx *cmd.Context) (string, []enqueuedAction, error) {
 	actionParams := map[string]interface{}{}
 	if c.paramsYAML.Path != "" {
 		b, err := c.paramsYAML.Read(ctx)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return "", nil, errors.Trace(err)
 		}
 
 		err = yaml.Unmarshal(b, &actionParams)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return "", nil, errors.Trace(err)
 		}
 
 		conformantParams, err := common.ConformYAML(actionParams)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return "", nil, errors.Trace(err)
 		}
 
 		betterParams, ok := conformantParams.(map[string]interface{})
 		if !ok {
-			return nil, errors.New("params must contain a YAML map with string keys")
+			return "", nil, errors.New("params must contain a YAML map with string keys")
 		}
 
 		actionParams = betterParams
@@ -325,7 +355,7 @@ func (c *callCommand) enqueueActions(ctx *cmd.Context) (*params.ActionResults, e
 		if !c.parseStrings {
 			err := yaml.Unmarshal([]byte(value), &cleansedValue)
 			if err != nil {
-				return nil, errors.Trace(err)
+				return "", nil, errors.Trace(err)
 			}
 		}
 		// Insert the value in the map.
@@ -333,18 +363,18 @@ func (c *callCommand) enqueueActions(ctx *cmd.Context) (*params.ActionResults, e
 	}
 	conformantParams, err := common.ConformYAML(actionParams)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return "", nil, errors.Trace(err)
 	}
 	typedConformantParams, ok := conformantParams.(map[string]interface{})
 	if !ok {
-		return nil, errors.Errorf("params must be a map, got %T", typedConformantParams)
+		return "", nil, errors.Errorf("params must be a map, got %T", typedConformantParams)
 	}
 	actions := make([]params.Action, len(c.unitReceivers))
 	for i, unitReceiver := range c.unitReceivers {
 		if strings.HasSuffix(unitReceiver, "leader") {
 			if c.api.BestAPIVersion() < 3 {
 				app := strings.Split(unitReceiver, "/")[0]
-				return nil, errors.Errorf("unable to determine leader for application %q"+
+				return "", nil, errors.Errorf("unable to determine leader for application %q"+
 					"\nleader determination is unsupported by this API"+
 					"\neither upgrade your controller, or explicitly specify a unit", app)
 			}
@@ -352,17 +382,31 @@ func (c *callCommand) enqueueActions(ctx *cmd.Context) (*params.ActionResults, e
 		} else {
 			actions[i].Receiver = names.NewUnitTag(unitReceiver).String()
 		}
-		actions[i].Name = c.functionName
+		actions[i].Name = c.actionName
 		actions[i].Parameters = actionParams
 	}
-	results, err := c.api.Enqueue(params.Actions{Actions: actions})
+	results, err := c.api.EnqueueOperation(params.Actions{Actions: actions})
 	if err != nil {
-		return nil, errors.Trace(err)
+		return "", nil, errors.Trace(err)
 	}
-	if len(results.Results) != len(c.unitReceivers) {
-		return nil, errors.New("illegal number of results returned")
+	if len(results.Actions) != len(c.unitReceivers) {
+		return "", nil, errors.New("illegal number of results returned")
 	}
-	return &results, nil
+	tasks := make([]enqueuedAction, len(results.Actions))
+	for i, a := range results.Actions {
+		tasks[i] = enqueuedAction{
+			task:     a.Result,
+			receiver: c.unitReceivers[i],
+		}
+		if a.Error != nil {
+			tasks[i].err = a.Error
+		}
+	}
+	operationTag, err := names.ParseOperationTag(results.OperationTag)
+	if err != nil {
+		return "", nil, errors.Trace(err)
+	}
+	return operationTag.Id(), tasks, nil
 }
 
 // filteredOutputKeys are those we don't want to display as part of the
@@ -445,7 +489,7 @@ func printPlainOutput(writer io.Writer, value interface{}) error {
 	return nil
 }
 
-func (c *callCommand) ensureAPI() (err error) {
+func (c *runCommand) ensureAPI() (err error) {
 	if c.api != nil {
 		return nil
 	}

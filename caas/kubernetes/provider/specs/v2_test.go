@@ -4,11 +4,15 @@
 package specs_test
 
 import (
+	"encoding/base64"
+
 	jc "github.com/juju/testing/checkers"
 	gc "gopkg.in/check.v1"
+	admissionregistration "k8s.io/api/admissionregistration/v1beta1"
 	core "k8s.io/api/core/v1"
 	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
@@ -69,6 +73,11 @@ containers:
       restricted: 'yes'
       switch: on
       special: p@ssword's
+      my-resource-limit:
+        resource:
+          container-name: container1
+          resource: requests.cpu
+          divisor: 1m
     files:
       - name: configuration
         mountPath: /var/lib/foo
@@ -153,6 +162,7 @@ kubernetesResources:
     readinessGates:
       - conditionType: PodScheduled
     dnsPolicy: ClusterFirstWithHostNet
+    hostNetwork: true
   secrets:
     - name: build-robot-secret
       type: Opaque
@@ -169,7 +179,7 @@ kubernetesResources:
   customResourceDefinitions:
     tfjobs.kubeflow.org:
       group: kubeflow.org
-      scope: Namespaced
+      scope: Cluster
       names:
         kind: TFJob
         singular: tfjob
@@ -182,6 +192,14 @@ kubernetesResources:
       - name: v1beta2
         served: true
         storage: false
+      conversion:
+        strategy: None
+      preserveUnknownFields: false
+      additionalPrinterColumns:
+      - name: Worker
+        type: integer
+        description: Worker attribute.
+        jsonPath: .spec.tfReplicaSpecs.Worker
       validation:
         openAPIV3Schema:
           properties:
@@ -243,6 +261,47 @@ kubernetesResources:
               backend:
                 serviceName: test
                 servicePort: 80
+  mutatingWebhookConfigurations:
+    example-mutatingwebhookconfiguration:
+      - name: "example.mutatingwebhookconfiguration.com"
+        failurePolicy: Ignore
+        clientConfig:
+          service:
+            name: apple-service
+            namespace: apples
+            path: /apple
+          caBundle: "YXBwbGVz"
+        namespaceSelector:
+          matchExpressions:
+          - key: production
+            operator: DoesNotExist
+        rules:
+        - apiGroups:
+          - ""
+          apiVersions:
+          - v1
+          operations:
+          - CREATE
+          - UPDATE
+          resources:
+          - pods
+  validatingWebhookConfigurations:
+    pod-policy.example.com:
+      - name: "pod-policy.example.com"
+        rules:
+        - apiGroups:   [""]
+          apiVersions: ["v1"]
+          operations:  ["CREATE"]
+          resources:   ["pods"]
+          scope:       "Namespaced"
+        clientConfig:
+          service:
+            namespace: "example-namespace"
+            name: "example-service"
+          caBundle: "YXBwbGVz"
+        admissionReviewVersions: ["v1", "v1beta1"]
+        sideEffects: None
+        timeoutSeconds: 5
 `[1:]
 
 	expectedFileContent := `
@@ -274,6 +333,7 @@ foo: bar
 		}
 		// always parse to latest version.
 		pSpecs.Version = specs.CurrentVersion
+
 		pSpecs.Containers = []specs.ContainerSpec{
 			{
 				Name:            "gitlab",
@@ -290,12 +350,19 @@ echo "do some stuff here for gitlab container"
 					{ContainerPort: 443, Name: "mary"},
 				},
 				Config: map[string]interface{}{
-					"attr":       `'foo=bar; name["fred"]="blogs";'`,
+					"attr":       `foo=bar; name["fred"]="blogs";`,
 					"foo":        "bar",
-					"restricted": "'yes'",
+					"restricted": "yes",
 					"switch":     true,
-					"brackets":   `'["hello", "world"]'`,
-					"special":    "'p@ssword''s'",
+					"brackets":   `["hello", "world"]`,
+					"special":    "p@ssword's",
+					"my-resource-limit": map[string]interface{}{
+						"resource": map[string]interface{}{
+							"container-name": "container1",
+							"resource":       "requests.cpu",
+							"divisor":        "1m",
+						},
+					},
 				},
 				Files: []specs.FileSet{
 					{
@@ -366,10 +433,10 @@ echo "do some stuff here for gitlab-init container"
 				},
 				Config: map[string]interface{}{
 					"foo":        "bar",
-					"restricted": "'yes'",
+					"restricted": "yes",
 					"switch":     true,
-					"brackets":   `'["hello", "world"]'`,
-					"special":    "'p@ssword''s'",
+					"brackets":   `["hello", "world"]`,
+					"special":    "p@ssword's",
 				},
 			},
 		}
@@ -425,6 +492,69 @@ echo "do some stuff here for gitlab-init container"
 			},
 		}
 
+		webhookRule1 := admissionregistration.Rule{
+			APIGroups:   []string{""},
+			APIVersions: []string{"v1"},
+			Resources:   []string{"pods"},
+		}
+		webhookRuleWithOperations1 := admissionregistration.RuleWithOperations{
+			Operations: []admissionregistration.OperationType{
+				admissionregistration.Create,
+				admissionregistration.Update,
+			},
+		}
+		webhookRuleWithOperations1.Rule = webhookRule1
+		CABundle1, err := base64.StdEncoding.DecodeString("YXBwbGVz")
+		c.Assert(err, jc.ErrorIsNil)
+		webhookFailurePolicy1 := admissionregistration.Ignore
+		webhook1 := admissionregistration.MutatingWebhook{
+			Name:          "example.mutatingwebhookconfiguration.com",
+			FailurePolicy: &webhookFailurePolicy1,
+			ClientConfig: admissionregistration.WebhookClientConfig{
+				Service: &admissionregistration.ServiceReference{
+					Name:      "apple-service",
+					Namespace: "apples",
+					Path:      strPtr("/apple"),
+				},
+				CABundle: CABundle1,
+			},
+			NamespaceSelector: &metav1.LabelSelector{
+				MatchExpressions: []metav1.LabelSelectorRequirement{
+					{Key: "production", Operator: metav1.LabelSelectorOpDoesNotExist},
+				},
+			},
+			Rules: []admissionregistration.RuleWithOperations{webhookRuleWithOperations1},
+		}
+
+		scope := admissionregistration.NamespacedScope
+		webhookRule2 := admissionregistration.Rule{
+			APIGroups:   []string{""},
+			APIVersions: []string{"v1"},
+			Resources:   []string{"pods"},
+			Scope:       &scope,
+		}
+		webhookRuleWithOperations2 := admissionregistration.RuleWithOperations{
+			Operations: []admissionregistration.OperationType{
+				admissionregistration.Create,
+			},
+		}
+		webhookRuleWithOperations2.Rule = webhookRule2
+		sideEffects := admissionregistration.SideEffectClassNone
+		webhook2 := admissionregistration.ValidatingWebhook{
+			Name:  "pod-policy.example.com",
+			Rules: []admissionregistration.RuleWithOperations{webhookRuleWithOperations2},
+			ClientConfig: admissionregistration.WebhookClientConfig{
+				Service: &admissionregistration.ServiceReference{
+					Name:      "example-service",
+					Namespace: "example-namespace",
+				},
+				CABundle: CABundle1,
+			},
+			AdmissionReviewVersions: []string{"v1", "v1beta1"},
+			SideEffects:             &sideEffects,
+			TimeoutSeconds:          int32Ptr(5),
+		}
+
 		pSpecs.ProviderPod = &k8sspecs.K8sPodSpec{
 			KubernetesResources: &k8sspecs.KubernetesResources{
 				ServiceAccounts: []k8sspecs.K8sServiceAccountSpec{
@@ -441,7 +571,8 @@ echo "do some stuff here for gitlab-init container"
 					ReadinessGates: []core.PodReadinessGate{
 						{ConditionType: core.PodScheduled},
 					},
-					DNSPolicy: "ClusterFirstWithHostNet",
+					DNSPolicy:   "ClusterFirstWithHostNet",
+					HostNetwork: true,
 				},
 				Secrets: []k8sspecs.Secret{
 					{
@@ -471,11 +602,23 @@ password: shhhh`[1:],
 							{Name: "v1", Served: true, Storage: true},
 							{Name: "v1beta2", Served: true, Storage: false},
 						},
-						Scope: "Namespaced",
+						Scope:                 "Cluster",
+						PreserveUnknownFields: boolPtr(false),
 						Names: apiextensionsv1beta1.CustomResourceDefinitionNames{
 							Kind:     "TFJob",
 							Plural:   "tfjobs",
 							Singular: "tfjob",
+						},
+						Conversion: &apiextensionsv1beta1.CustomResourceConversion{
+							Strategy: apiextensionsv1beta1.NoneConverter,
+						},
+						AdditionalPrinterColumns: []apiextensionsv1beta1.CustomResourceColumnDefinition{
+							{
+								Name:        "Worker",
+								Type:        "integer",
+								Description: "Worker attribute.",
+								JSONPath:    ".spec.tfReplicaSpecs.Worker",
+							},
 						},
 						Validation: &apiextensionsv1beta1.CustomResourceValidation{
 							OpenAPIV3Schema: &apiextensionsv1beta1.JSONSchemaProps{
@@ -563,6 +706,12 @@ password: shhhh`[1:],
 					},
 				},
 				IngressResources: []k8sspecs.K8sIngressSpec{ingress1},
+				MutatingWebhookConfigurations: map[string][]admissionregistration.MutatingWebhook{
+					"example-mutatingwebhookconfiguration": {webhook1},
+				},
+				ValidatingWebhookConfigurations: map[string][]admissionregistration.ValidatingWebhook{
+					"pod-policy.example.com": {webhook2},
+				},
 			},
 		}
 		return pSpecs
@@ -669,7 +818,7 @@ kubernetesResources:
     tfjobs.kubeflow.org:
       group: kubeflow.org
       version: v1alpha2
-      scope: Cluster
+      scope: invalid-scope
       names:
         plural: "tfjobs"
         singular: "tfjob"
@@ -698,7 +847,41 @@ kubernetesResources:
 `[1:]
 
 	_, err := k8sspecs.ParsePodSpec(specStr)
-	c.Assert(err, gc.ErrorMatches, `custom resource definition "tfjobs.kubeflow.org" scope "Cluster" is not supported, please use "Namespaced" scope`)
+	c.Assert(err, gc.ErrorMatches, `custom resource definition "tfjobs.kubeflow.org" scope "invalid-scope" is not supported, please use "Namespaced" or "Cluster" scope`)
+}
+
+func (s *v2SpecsSuite) TestValidateMutatingWebhookConfigurations(c *gc.C) {
+	specStr := versionHeader + `
+containers:
+  - name: gitlab-helper
+    image: gitlab-helper/latest
+    ports:
+    - containerPort: 8080
+      protocol: TCP
+kubernetesResources:
+  mutatingWebhookConfigurations:
+    example-mutatingwebhookconfiguration:
+`[1:]
+
+	_, err := k8sspecs.ParsePodSpec(specStr)
+	c.Assert(err, gc.ErrorMatches, `empty webhooks "example-mutatingwebhookconfiguration" not valid`)
+}
+
+func (s *v2SpecsSuite) TestValidateValidatingWebhookConfigurations(c *gc.C) {
+	specStr := versionHeader + `
+containers:
+  - name: gitlab-helper
+    image: gitlab-helper/latest
+    ports:
+    - containerPort: 8080
+      protocol: TCP
+kubernetesResources:
+  validatingWebhookConfigurations:
+    example-validatingwebhookconfiguration:
+`[1:]
+
+	_, err := k8sspecs.ParsePodSpec(specStr)
+	c.Assert(err, gc.ErrorMatches, `empty webhooks "example-validatingwebhookconfiguration" not valid`)
 }
 
 func (s *v2SpecsSuite) TestValidateIngressResources(c *gc.C) {
@@ -742,4 +925,25 @@ bar: a-bad-guy
 
 	_, err := k8sspecs.ParsePodSpec(specStr)
 	c.Assert(err, gc.ErrorMatches, `json: unknown field "bar"`)
+}
+
+// TODO(caas): move these pointer related value change funcs to /testing package.
+func float64Ptr(f float64) *float64 {
+	return &f
+}
+
+func int32Ptr(i int32) *int32 {
+	return &i
+}
+
+func int64Ptr(i int64) *int64 {
+	return &i
+}
+
+func boolPtr(b bool) *bool {
+	return &b
+}
+
+func strPtr(b string) *string {
+	return &b
 }

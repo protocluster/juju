@@ -11,7 +11,7 @@ package api
 // New facades should start at 1.
 // Facades that existed before versioning start at 0.
 var facadeVersions = map[string]int{
-	"Action":                       5,
+	"Action":                       6,
 	"ActionPruner":                 1,
 	"Agent":                        2,
 	"AgentTools":                   1,
@@ -83,7 +83,7 @@ var facadeVersions = map[string]int{
 	"Payloads":                     1,
 	"PayloadsHookContext":          1,
 	"Pinger":                       1,
-	"Provisioner":                  9,
+	"Provisioner":                  10,
 	"ProxyUpdater":                 2,
 	"Reboot":                       2,
 	"RelationStatusWatcher":        1,
@@ -95,7 +95,7 @@ var facadeVersions = map[string]int{
 	"Resumer":                      2,
 	"RetryStrategy":                1,
 	"Singular":                     2,
-	"Spaces":                       5,
+	"Spaces":                       6,
 	"SSHClient":                    2,
 	"StatusHistory":                2,
 	"Storage":                      6,
@@ -104,7 +104,7 @@ var facadeVersions = map[string]int{
 	"Subnets":                      3,
 	"Undertaker":                   1,
 	"UnitAssigner":                 1,
-	"Uniter":                       14,
+	"Uniter":                       15,
 	"Upgrader":                     1,
 	"UpgradeSeries":                1,
 	"UpgradeSteps":                 1,

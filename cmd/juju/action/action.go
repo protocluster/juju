@@ -26,22 +26,13 @@ type APIClient interface {
 	// the designated ActionReceiver, returning the params.Action for each
 	// queued Action, or an error if there was a problem queueing up the
 	// Action.
+	// TODO(juju3) - remove.
 	Enqueue(params.Actions) (params.ActionResults, error)
 
-	// ListAll takes a list of Tags representing ActionReceivers and returns
-	// all of the Actions that have been queued or run by each of those
-	// Entities.
-	ListAll(params.Entities) (params.ActionsByReceivers, error)
-
-	// ListPending takes a list of Tags representing ActionReceivers
-	// and returns all of the Actions that are queued for each of those
-	// Entities.
-	ListPending(params.Entities) (params.ActionsByReceivers, error)
-
-	// ListCompleted takes a list of Tags representing ActionReceivers
-	// and returns all of the Actions that have been run on each of those
-	// Entities.
-	ListCompleted(params.Entities) (params.ActionsByReceivers, error)
+	// EnqueueOperation takes a list of Actions and queues them up to be executed as
+	// an operation, each action running as a task on the the designated ActionReceiver.
+	// We return the ID of the overall operation and each individual task.
+	EnqueueOperation(params.Actions) (params.EnqueuedActions, error)
 
 	// Cancel attempts to cancel a queued up Action from running.
 	Cancel(params.Entities) (params.ActionResults, error)
@@ -54,8 +45,8 @@ type APIClient interface {
 	// the ActionReceiver if necessary.
 	Actions(params.Entities) (params.ActionResults, error)
 
-	// Operations fetches the called functions (actions) for specified apps/units.
-	Operations(params.OperationQueryArgs) (params.ActionResults, error)
+	// Operations fetches the called operations for specified apps/units.
+	Operations(params.OperationQueryArgs) (params.OperationResults, error)
 
 	// FindActionTagsByPrefix takes a list of string prefixes and finds
 	// corresponding ActionTags that match that prefix.

@@ -8,6 +8,13 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/juju/juju/agent"
+	"github.com/juju/juju/caas"
+	k8sannotations "github.com/juju/juju/core/annotations"
+	"github.com/juju/juju/core/paths"
+	"github.com/juju/juju/core/status"
+	"github.com/juju/juju/core/watcher"
+
 	"github.com/juju/errors"
 	"github.com/juju/version"
 	"gopkg.in/juju/names.v3"
@@ -18,13 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-
-	"github.com/juju/juju/agent"
-	"github.com/juju/juju/caas"
-	k8sannotations "github.com/juju/juju/core/annotations"
-	"github.com/juju/juju/core/paths"
-	"github.com/juju/juju/core/status"
-	"github.com/juju/juju/core/watcher"
+	"k8s.io/client-go/informers"
 )
 
 func operatorLabels(appName string) map[string]string {
@@ -168,7 +169,7 @@ func (k *kubernetesClient) EnsureOperator(appName, agentPath string, config *caa
 	}
 	cleanups = append(cleanups, func() { k.deleteService(operatorName) })
 	services := k.client().CoreV1().Services(k.namespace)
-	svc, err := services.Get(operatorName, v1.GetOptions{IncludeUninitialized: false})
+	svc, err := services.Get(operatorName, v1.GetOptions{})
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -297,7 +298,7 @@ func (k *kubernetesClient) OperatorExists(appName string) (caas.OperatorState, e
 	var result caas.OperatorState
 	operatorName := k.operatorName(appName)
 	statefulSets := k.client().AppsV1().StatefulSets(k.namespace)
-	operator, err := statefulSets.Get(operatorName, v1.GetOptions{IncludeUninitialized: true})
+	operator, err := statefulSets.Get(operatorName, v1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
 		return result, nil
 	}
@@ -394,22 +395,20 @@ func (k *kubernetesClient) DeleteOperator(appName string) (err error) {
 // WatchOperator returns a watcher which notifies when there
 // are changes to the operator of the specified application.
 func (k *kubernetesClient) WatchOperator(appName string) (watcher.NotifyWatcher, error) {
-	pods := k.client().CoreV1().Pods(k.namespace)
-	w, err := pods.Watch(v1.ListOptions{
-		LabelSelector: operatorSelector(appName),
-		Watch:         true,
-	})
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return k.newWatcher(w, appName, k.clock)
+	factory := informers.NewSharedInformerFactoryWithOptions(k.client(), 0,
+		informers.WithNamespace(k.namespace),
+		informers.WithTweakListOptions(func(o *v1.ListOptions) {
+			o.LabelSelector = applicationSelector(appName)
+		}),
+	)
+	return k.newWatcher(factory.Core().V1().Pods().Informer(), appName, k.clock)
 }
 
 // Operator returns an Operator with current status and life details.
 func (k *kubernetesClient) Operator(appName string) (*caas.Operator, error) {
 	operatorName := k.operatorName(appName)
 	statefulSets := k.client().AppsV1().StatefulSets(k.namespace)
-	operator, err := statefulSets.Get(operatorName, v1.GetOptions{IncludeUninitialized: true})
+	operator, err := statefulSets.Get(operatorName, v1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
 		return nil, errors.NotFoundf("operator %s", appName)
 	}
@@ -450,7 +449,7 @@ func (k *kubernetesClient) Operator(appName string) (*caas.Operator, error) {
 		}
 	}
 	configMaps := k.client().CoreV1().ConfigMaps(k.namespace)
-	configMap, err := configMaps.Get(operatorConfigMapName(operatorName), v1.GetOptions{IncludeUninitialized: true})
+	configMap, err := configMaps.Get(operatorConfigMapName(operatorName), v1.GetOptions{})
 	if err != nil && !k8serrors.IsNotFound(err) {
 		return nil, errors.Trace(err)
 	}

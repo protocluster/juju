@@ -812,6 +812,22 @@ type SpaceResults struct {
 	Results []SpaceResult `json:"results"`
 }
 
+// RemoveSpaceResults contains multiple RemoveSpace results.
+type RemoveSpaceResults struct {
+	Results []RemoveSpaceResult `json:"results"`
+}
+
+// RemoveSpaceResult contains entries if removing a space is not possible.
+// Constraints are a slice of entities which has constraints on the space.
+// Bindings are a slice of entities which has bindings on that space.
+// Error is filled if an error has occured which is unexpected.
+type RemoveSpaceResult struct {
+	Constraints        []Entity `json:"constraints,omitempty"`
+	Bindings           []Entity `json:"bindings,omitempty"`
+	ControllerSettings []string `json:"controller-settings,omitempty"`
+	Error              *Error   `json:"error,omitempty"`
+}
+
 // ListSubnetsResults holds the result of a ListSubnets API call.
 type ListSubnetsResults struct {
 	Results []Subnet `json:"results"`
@@ -875,6 +891,18 @@ type CreateSubnetParams struct {
 	IsPublic  bool     `json:"is-public"`
 }
 
+// RenameSpaceParams holds params to rename a space.
+// A `from` and `to` space tag.
+type RenameSpaceParams struct {
+	FromSpaceTag string `json:"from-space-tag"`
+	ToSpaceTag   string `json:"to-space-tag"`
+}
+
+// RenameSpacesParams holds the arguments of the RenameSpaces API call.
+type RenameSpacesParams struct {
+	SpacesRenames []RenameSpaceParams `json:"rename-spaces"`
+}
+
 // CreateSpacesParams holds the arguments of the AddSpaces API call.
 type CreateSpacesParamsV4 struct {
 	Spaces []CreateSpaceParamsV4 `json:"spaces"`
@@ -901,6 +929,22 @@ type CreateSpaceParams struct {
 	SpaceTag   string   `json:"space-tag"`
 	Public     bool     `json:"public"`
 	ProviderId string   `json:"provider-id,omitempty"`
+}
+
+// ListSpacesResults holds the list of all available spaces.
+type ShowSpaceResult struct {
+	// Information about a given space.
+	Space Space `json:"space"`
+	// Application names which are bound to a given space.
+	Applications []string `json:"applications"`
+	// MachineCount is the number of machines connected to a given space.
+	MachineCount int    `json:"machine-count"`
+	Error        *Error `json:"error,omitempty"`
+}
+
+// ListSpacesResults holds the list of all available spaces.
+type ShowSpaceResults struct {
+	Results []ShowSpaceResult `json:"results"`
 }
 
 // ListSpacesResults holds the list of all available spaces.

@@ -204,6 +204,78 @@ func (s *ProvisionerTaskSuite) TestProvisionerRetries(c *gc.C) {
 	s.instanceBroker.CheckCallNames(c, "StartInstance", "StartInstance")
 }
 
+func (s *ProvisionerTaskSuite) TestMultipleSpaceConstraints(c *gc.C) {
+	ctrl := gomock.NewController(c)
+	defer ctrl.Finish()
+
+	broker := s.setUpZonedEnviron(ctrl)
+	spaceConstraints := newSpaceConstraintStartInstanceParamsMatcher("alpha", "beta")
+
+	spaceConstraints.addMatch("subnets-to-zones", func(p environs.StartInstanceParams) bool {
+		if len(p.SubnetsToZones) != 2 {
+			return false
+		}
+
+		// Order independence.
+		for _, subZones := range p.SubnetsToZones {
+			for sub, zones := range subZones {
+				var zone string
+
+				switch sub {
+				case "subnet-1":
+					zone = "az-1"
+				case "subnet-2":
+					zone = "az-2"
+				default:
+					return false
+				}
+
+				if len(zones) != 1 || zones[0] != zone {
+					return false
+				}
+			}
+		}
+
+		return true
+	})
+
+	broker.EXPECT().DeriveAvailabilityZones(s.callCtx, spaceConstraints).Return([]string{}, nil)
+
+	// Use satisfaction of this call as the synchronisation point.
+	started := make(chan struct{})
+	broker.EXPECT().StartInstance(s.callCtx, spaceConstraints).Return(&environs.StartInstanceResult{
+		Instance: &testInstance{id: "instance-1"},
+	}, nil).Do(func(_ ...interface{}) {
+		go func() { started <- struct{}{} }()
+	})
+	task := s.newProvisionerTaskWithBroker(c, broker, nil)
+
+	m0 := &testMachine{
+		id:          "0",
+		constraints: "spaces=alpha,beta",
+		topology: params.ProvisioningNetworkTopology{
+			SubnetAZs: map[string][]string{
+				"subnet-1": {"az-1"},
+				"subnet-2": {"az-2"},
+			},
+			SpaceSubnets: map[string][]string{
+				"alpha": {"subnet-1"},
+				"beta":  {"subnet-2"},
+			},
+		},
+	}
+	s.machineStatusResults = []apiprovisioner.MachineStatusResult{{Machine: m0, Status: params.StatusResult{}}}
+	s.sendMachineErrorRetryChange(c)
+
+	select {
+	case <-started:
+	case <-time.After(coretesting.LongWait):
+		c.Fatalf("no matching call to StartInstance")
+	}
+
+	workertest.CleanKill(c, task)
+}
+
 func (s *ProvisionerTaskSuite) TestZoneConstraintsNoZoneAvailable(c *gc.C) {
 	ctrl := gomock.NewController(c)
 	defer ctrl.Finish()
@@ -329,6 +401,22 @@ func (s *ProvisionerTaskSuite) TestZoneConstraintsWithDistributionGroup(c *gc.C)
 	}
 
 	workertest.CleanKill(c, task)
+}
+
+func (s *ProvisionerTaskSuite) TestPopulateAZMachinesErrorWorkerStopped(c *gc.C) {
+	ctrl := gomock.NewController(c)
+	defer ctrl.Finish()
+
+	// `ProvisionerTask.populateAvailabilityZoneMachines` calls through to this method.
+	broker := mocks.NewMockZonedEnviron(ctrl)
+	broker.EXPECT().AllRunningInstances(s.callCtx).Return(nil, errors.New("boom"))
+
+	task := s.newProvisionerTaskWithBroker(c, broker, map[names.MachineTag][]string{
+		names.NewMachineTag("0"): {"az1"},
+	})
+
+	err := workertest.CheckKill(c, task)
+	c.Assert(err, gc.ErrorMatches, "boom")
 }
 
 // setUpZonedEnviron creates a mock environ with instances based on those set
@@ -517,20 +605,19 @@ func (i *testInstance) Id() instance.Id {
 }
 
 type testMachine struct {
+	*apiprovisioner.Machine
+
 	mu sync.Mutex
 
-	*apiprovisioner.Machine
-	id   string
-	life life.Value
-
-	instance     *testInstance
-	keepInstance bool
-
+	id             string
+	life           life.Value
+	instance       *testInstance
+	keepInstance   bool
 	markForRemoval bool
 	constraints    string
-
-	instStatusMsg string
-	modStatusMsg  string
+	instStatusMsg  string
+	modStatusMsg   string
+	topology       params.ProvisioningNetworkTopology
 }
 
 func (m *testMachine) Id() string {
@@ -581,7 +668,7 @@ func (m *testMachine) SetInstanceStatus(_ status.Status, message string, _ map[s
 func (m *testMachine) InstanceStatus() (status.Status, string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return status.Status(""), m.instStatusMsg, nil
+	return "", m.instStatusMsg, nil
 }
 
 func (m *testMachine) SetModificationStatus(_ status.Status, message string, _ map[string]interface{}) error {
@@ -594,15 +681,15 @@ func (m *testMachine) SetModificationStatus(_ status.Status, message string, _ m
 func (m *testMachine) ModificationStatus() (status.Status, string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return status.Status(""), m.modStatusMsg, nil
+	return "", m.modStatusMsg, nil
 }
 
-func (m *testMachine) SetStatus(status status.Status, info string, data map[string]interface{}) error {
+func (m *testMachine) SetStatus(_ status.Status, _ string, _ map[string]interface{}) error {
 	return nil
 }
 
 func (m *testMachine) Status() (status.Status, string, error) {
-	return status.Status(""), "", nil
+	return "", "", nil
 }
 
 func (m *testMachine) ModelAgentVersion() (*version.Number, error) {
@@ -610,18 +697,20 @@ func (m *testMachine) ModelAgentVersion() (*version.Number, error) {
 }
 
 func (m *testMachine) SetInstanceInfo(
-	id instance.Id, displayName string, nonce string, characteristics *instance.HardwareCharacteristics,
-	networkConfig []params.NetworkConfig, volumes []params.Volume,
-	volumeAttachments map[string]params.VolumeAttachmentInfo, charmProfiles []string,
+	_ instance.Id, _ string, _ string, _ *instance.HardwareCharacteristics, _ []params.NetworkConfig, _ []params.Volume,
+	_ map[string]params.VolumeAttachmentInfo, _ []string,
 ) error {
 	return nil
 }
 
-func (m *testMachine) ProvisioningInfo() (*params.ProvisioningInfo, error) {
-	return &params.ProvisioningInfo{
-		ControllerConfig: coretesting.FakeControllerConfig(),
-		Series:           series.DefaultSupportedLTS(),
-		Constraints:      constraints.MustParse(m.constraints),
+func (m *testMachine) ProvisioningInfo() (*params.ProvisioningInfoV10, error) {
+	return &params.ProvisioningInfoV10{
+		ProvisioningInfoBase: params.ProvisioningInfoBase{
+			ControllerConfig: coretesting.FakeControllerConfig(),
+			Series:           series.DefaultSupportedLTS(),
+			Constraints:      constraints.MustParse(m.constraints),
+		},
+		ProvisioningNetworkTopology: m.topology,
 	}, nil
 }
 
@@ -691,6 +780,34 @@ func newAZConstraintStartInstanceParamsMatcher(zones ...string) *startInstancePa
 	}
 	return newStartInstanceParamsMatcher(map[string]func(environs.StartInstanceParams) bool{
 		fmt.Sprint("AZ constraints:", strings.Join(zones, ", ")): match,
+	})
+}
+
+func newSpaceConstraintStartInstanceParamsMatcher(spaces ...string) *startInstanceParamsMatcher {
+	match := func(p environs.StartInstanceParams) bool {
+		if !p.Constraints.HasSpaces() {
+			return false
+		}
+		cSpaces := p.Constraints.IncludeSpaces()
+		if len(cSpaces) != len(spaces) {
+			return false
+		}
+		for _, s := range spaces {
+			found := false
+			for _, cs := range spaces {
+				if s == cs {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false
+			}
+		}
+		return true
+	}
+	return newStartInstanceParamsMatcher(map[string]func(environs.StartInstanceParams) bool{
+		fmt.Sprint("space constraints:", strings.Join(spaces, ", ")): match,
 	})
 }
 

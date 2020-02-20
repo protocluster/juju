@@ -757,6 +757,11 @@ func (s *MigrationExportSuite) assertMigrateUnits(c *gc.C, st *state.State) {
 		err = unit.SetWorkloadVersion(version)
 		c.Assert(err, jc.ErrorIsNil)
 	}
+	err = unit.SetState(map[string]string{
+		"payload": "b4dc0ffee",
+	})
+	c.Assert(err, jc.ErrorIsNil)
+
 	dbModel, err := st.Model()
 	c.Assert(err, jc.ErrorIsNil)
 
@@ -804,6 +809,7 @@ func (s *MigrationExportSuite) assertMigrateUnits(c *gc.C, st *state.State) {
 	c.Assert(exported.MeterStatusInfo(), gc.Equals, "some info")
 	c.Assert(exported.WorkloadVersion(), gc.Equals, "steven")
 	c.Assert(exported.Annotations(), jc.DeepEquals, testAnnotations)
+	c.Assert(exported.State(), jc.DeepEquals, map[string]string{"payload": "b4dc0ffee"})
 	constraints := exported.Constraints()
 	c.Assert(constraints, gc.NotNil)
 	c.Assert(constraints.Architecture(), gc.Equals, "amd64")
@@ -1502,7 +1508,9 @@ func (s *MigrationExportSuite) TestActions(c *gc.C) {
 	m, err := s.State.Model()
 	c.Assert(err, jc.ErrorIsNil)
 
-	a, err := m.EnqueueAction(machine.MachineTag(), "foo", nil)
+	operationID, err := m.EnqueueOperation("a test")
+	c.Assert(err, jc.ErrorIsNil)
+	a, err := m.EnqueueAction(operationID, machine.MachineTag(), "foo", nil)
 	c.Assert(err, jc.ErrorIsNil)
 	a, err = a.Begin()
 	c.Assert(err, jc.ErrorIsNil)
@@ -1532,7 +1540,9 @@ func (s *MigrationExportSuite) TestActionsSkipped(c *gc.C) {
 	m, err := s.State.Model()
 	c.Assert(err, jc.ErrorIsNil)
 
-	_, err = m.EnqueueAction(machine.MachineTag(), "foo", nil)
+	operationID, err := s.Model.EnqueueOperation("a test")
+	c.Assert(err, jc.ErrorIsNil)
+	_, err = m.EnqueueAction(operationID, machine.MachineTag(), "foo", nil)
 	c.Assert(err, jc.ErrorIsNil)
 	model, err := s.State.ExportPartial(state.ExportConfig{
 		SkipActions: true,
@@ -2304,10 +2314,10 @@ func (s *MigrationExportSuite) TestRelationWithNoStatus(c *gc.C) {
 	c.Assert(err, jc.ErrorIsNil)
 	rel, err := s.State.AddRelation(eps...)
 	c.Assert(err, jc.ErrorIsNil)
-	wordpress_0 := s.Factory.MakeUnit(c, &factory.UnitParams{Application: wordpress})
-	mysql_0 := s.Factory.MakeUnit(c, &factory.UnitParams{Application: mysql})
+	wordpress0 := s.Factory.MakeUnit(c, &factory.UnitParams{Application: wordpress})
+	mysql0 := s.Factory.MakeUnit(c, &factory.UnitParams{Application: mysql})
 
-	ru, err := rel.Unit(wordpress_0)
+	ru, err := rel.Unit(wordpress0)
 	c.Assert(err, jc.ErrorIsNil)
 	wordpressSettings := map[string]interface{}{
 		"name": "wordpress/0",
@@ -2315,7 +2325,7 @@ func (s *MigrationExportSuite) TestRelationWithNoStatus(c *gc.C) {
 	err = ru.EnterScope(wordpressSettings)
 	c.Assert(err, jc.ErrorIsNil)
 
-	ru, err = rel.Unit(mysql_0)
+	ru, err = rel.Unit(mysql0)
 	c.Assert(err, jc.ErrorIsNil)
 	mysqlSettings := map[string]interface{}{
 		"name": "mysql/0",
@@ -2331,4 +2341,77 @@ func (s *MigrationExportSuite) TestRelationWithNoStatus(c *gc.C) {
 	rels := model.Relations()
 	c.Assert(rels, gc.HasLen, 1)
 	c.Assert(rels[0].Status(), gc.IsNil)
+}
+
+func (s *MigrationExportSuite) TestRemoteRelationSettingsForLocalUnitInCMR(c *gc.C) {
+	mac, err := apitesting.NewMacaroon("apimac")
+	c.Assert(err, gc.IsNil)
+
+	_, err = s.State.AddRemoteApplication(state.AddRemoteApplicationParams{
+		Name:        "gravy-rainbow",
+		URL:         "me/model.rainbow",
+		SourceModel: s.Model.ModelTag(),
+		Token:       "charisma",
+		OfferUUID:   "offer-uuid",
+		Endpoints: []charm.Relation{{
+			Interface: "mysql",
+			Name:      "db",
+			Role:      charm.RoleProvider,
+			Scope:     charm.ScopeGlobal,
+		}},
+		Spaces: []*environs.ProviderSpaceInfo{{
+			CloudType:          "ec2",
+			ProviderAttributes: map[string]interface{}{"network": "network-1"},
+			SpaceInfo: network.SpaceInfo{
+				Name:       "private",
+				ProviderId: "juju-space-private",
+				Subnets: []network.SubnetInfo{{
+					ProviderId:        "juju-subnet-24",
+					CIDR:              "1.2.4.0/24",
+					AvailabilityZones: []string{"az1", "az2"},
+					ProviderSpaceId:   "juju-space-private",
+					ProviderNetworkId: "network-1",
+				}},
+			},
+		}},
+		Bindings: map[string]string{
+			"db": "private",
+		},
+		// Macaroon not exported.
+		Macaroon: mac,
+	})
+	c.Assert(err, jc.ErrorIsNil)
+
+	wordpress := state.AddTestingApplication(c, s.State, "wordpress", state.AddTestingCharm(c, s.State, "wordpress"))
+	eps, err := s.State.InferEndpoints("gravy-rainbow", "wordpress")
+	c.Assert(err, jc.ErrorIsNil)
+	rel, err := s.State.AddRelation(eps...)
+	c.Assert(err, jc.ErrorIsNil)
+
+	wordpress0 := s.Factory.MakeUnit(c, &factory.UnitParams{Application: wordpress})
+	ru, err := rel.Unit(wordpress0)
+	c.Assert(err, jc.ErrorIsNil)
+	wordpressSettings := map[string]interface{}{"name": "wordpress/0"}
+	err = ru.EnterScope(wordpressSettings)
+	c.Assert(err, jc.ErrorIsNil)
+
+	model, err := s.State.Export()
+	c.Assert(err, jc.ErrorIsNil)
+
+	c.Assert(model.Relations(), gc.HasLen, 1)
+	exRel := model.Relations()[0]
+	c.Assert(exRel.Key(), gc.Equals, "wordpress:db gravy-rainbow:db")
+	c.Assert(exRel.Endpoints(), gc.HasLen, 2)
+
+	for _, exEp := range exRel.Endpoints() {
+		// We expect that the relation settings for the local application unit
+		// are recorded against its relation endpoint,
+		// but the remote application has no unit settings.
+		if exEp.ApplicationName() == "wordpress" {
+			c.Check(exEp.Settings(wordpress0.Name()), jc.DeepEquals, wordpressSettings)
+		} else {
+			c.Check(exEp.ApplicationName(), gc.Equals, "gravy-rainbow")
+			c.Check(exEp.AllSettings(), gc.HasLen, 0)
+		}
+	}
 }

@@ -208,6 +208,12 @@ func (s *MigrationSuite) TestKnownCollections(c *gc.C) {
 
 		// Resources are transferred separately
 		"storedResources",
+
+		// Unit state entries will be automatically created when the
+		// operator framework code mutates the state for the charm
+		// running within a unit. This is a new feature that is not
+		// backwards compatible with older controllers.
+		unitStatesC,
 	)
 
 	// THIS SET WILL BE REMOVED WHEN MIGRATIONS ARE COMPLETE
@@ -219,6 +225,8 @@ func (s *MigrationSuite) TestKnownCollections(c *gc.C) {
 		// sure the leader units' leases are claimed in the target
 		// controller when leases are managed in raft.
 		leaseHoldersC,
+		// TODO(wallyworld) - migrate operations
+		operationsC,
 	)
 
 	modelCollections := set.NewStrings()
@@ -563,6 +571,7 @@ func (s *MigrationSuite) TestConstraintsDocFields(c *gc.C) {
 		// ModelUUID shouldn't be exported, and is inherited
 		// from the model definition.
 		"ModelUUID",
+		"DocID",
 		"Arch",
 		"CpuCores",
 		"CpuPower",
@@ -715,6 +724,8 @@ func (s *MigrationSuite) TestSSHHostKeyDocFields(c *gc.C) {
 func (s *MigrationSuite) TestActionDocFields(c *gc.C) {
 	ignored := set.NewStrings(
 		"ModelUUID",
+		// TODO(wallyworld) - migrate operations
+		"Operation",
 	)
 	migrated := set.NewStrings(
 		"DocId",

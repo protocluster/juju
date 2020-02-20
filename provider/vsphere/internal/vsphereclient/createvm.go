@@ -58,6 +58,9 @@ type CreateVirtualMachineParams struct {
 	// in which to create the VM.
 	Folder string
 
+	// RootVMFolder is the customized root vm folder.
+	RootVMFolder string
+
 	// VMDKDirectory is the datastore path in which VMDKs are stored for
 	// this controller. Within this directory there will be subdirectories
 	// for each series, and within those the VMDKs will be stored.
@@ -166,16 +169,25 @@ func (c *Client) ensureTemplateVM(
 	datastore *object.Datastore,
 	args CreateVirtualMachineParams,
 ) (vm *object.VirtualMachine, err error) {
-	finder, _, err := c.finder(ctx)
-	if err != nil {
+
+	templateFolder, err := c.FindFolder(ctx, path.Join(args.RootVMFolder, vmTemplatePath(args)))
+	if err != nil && !errors.IsNotFound(err) {
 		return nil, errors.Trace(err)
 	}
-	templateVM, err := finder.VirtualMachine(ctx, path.Join(vmTemplatePath(args), vmTemplateName(args)))
-	if err == nil && templateVM != nil {
-		return templateVM, nil
-	}
-	if _, ok := err.(*find.NotFoundError); !ok {
-		return nil, errors.Trace(nil)
+	// Consider only the case without error: it means folder already exists
+	// and we can look if there is a template inside.
+	if err == nil {
+		finder, _, err := c.finder(ctx)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		templateVM, err := finder.VirtualMachine(ctx, path.Join(templateFolder.InventoryPath, vmTemplateName(args)))
+		if err == nil && templateVM != nil {
+			return templateVM, nil
+		}
+		if _, ok := err.(*find.NotFoundError); !ok {
+			return nil, errors.Trace(nil)
+		}
 	}
 
 	spec, err := c.createImportSpec(ctx, args, datastore)
@@ -183,7 +195,7 @@ func (c *Client) ensureTemplateVM(
 		return nil, errors.Annotate(err, "creating import spec")
 	}
 
-	vmFolder, err := c.EnsureVMFolder(ctx, vmTemplatePath(args))
+	vmFolder, err := c.EnsureVMFolder(ctx, args.RootVMFolder, vmTemplatePath(args))
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -299,16 +311,12 @@ func (c *Client) CreateVirtualMachine(
 	ctx context.Context,
 	args CreateVirtualMachineParams,
 ) (_ *mo.VirtualMachine, err error) {
-	finder, datacenter, err := c.finder(ctx)
+	_, datacenter, err := c.finder(ctx)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	folders, err := datacenter.Folders(ctx)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	folderPath := path.Join(folders.VmFolder.InventoryPath, args.Folder)
-	vmFolder, err := finder.Folder(ctx, folderPath)
+
+	vmFolder, err := c.FindFolder(ctx, args.Folder)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -398,7 +406,7 @@ func (c *Client) extendVMRootDisk(
 	sizeMB uint64,
 	taskWaiter *taskWaiter,
 ) error {
-	disk, backing, err := c.getDiskWithFileBacking(ctx, vm)
+	disk, err := c.getDisk(ctx, vm)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -408,10 +416,7 @@ func (c *Client) extendVMRootDisk(
 		// user-specified size, so leave it alone.
 		return nil
 	}
-	datastorePath := backing.GetVirtualDeviceFileBackingInfo().FileName
-	return errors.Trace(c.extendDisk(
-		ctx, vm, datacenter, datastorePath, newCapacityInKB, taskWaiter,
-	))
+	return errors.Trace(c.extendDisk(ctx, vm, disk, newCapacityInKB))
 }
 
 func (c *Client) createImportSpec(
@@ -512,7 +517,7 @@ func (c *Client) addNetworkDevice(
 	dvportgroupConfig map[types.ManagedObjectReference]types.DVPortgroupConfigInfo,
 ) (*types.VirtualVmxnet3, error) {
 	var networkBacking types.BaseVirtualDeviceBackingInfo
-	if dvportgroupConfig, ok := dvportgroupConfig[network.Reference()]; !ok {
+	if dvportgroupConfigInfo, ok := dvportgroupConfig[network.Reference()]; !ok {
 		// It's not a distributed virtual portgroup, so return
 		// a backing info for a plain old network interface.
 		networkBacking = &types.VirtualEthernetCardNetworkBackingInfo{
@@ -524,16 +529,19 @@ func (c *Client) addNetworkDevice(
 		// It's a distributed virtual portgroup, so retrieve the details of
 		// the distributed virtual switch, and return a backing info for
 		// connecting the VM to the portgroup.
+		if dvportgroupConfigInfo.DistributedVirtualSwitch == nil {
+			return nil, errors.NewNotValid(nil, fmt.Sprintf("empty distributed virtual switch for DVPortgroup %q, please check if permission is sufficient", dvportgroupConfigInfo.Name))
+		}
 		var dvs mo.DistributedVirtualSwitch
 		if err := c.client.RetrieveOne(
-			ctx, *dvportgroupConfig.DistributedVirtualSwitch, nil, &dvs,
+			ctx, *dvportgroupConfigInfo.DistributedVirtualSwitch, nil, &dvs,
 		); err != nil {
 			return nil, errors.Annotate(err, "retrieving distributed vSwitch details")
 		}
 		networkBacking = &types.VirtualEthernetCardDistributedVirtualPortBackingInfo{
 			Port: types.DistributedVirtualSwitchPortConnection{
 				SwitchUuid:   dvs.Uuid,
-				PortgroupKey: dvportgroupConfig.Key,
+				PortgroupKey: dvportgroupConfigInfo.Key,
 			},
 		}
 	}

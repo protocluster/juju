@@ -140,6 +140,7 @@ type fakeAPIClient struct {
 	delay              *time.Timer
 	timeout            *time.Timer
 	actionResults      []params.ActionResult
+	operationResults   []params.OperationResult
 	operationQueryArgs params.OperationQueryArgs
 	enqueuedActions    params.Actions
 	actionsByReceivers []params.ActionsByReceiver
@@ -173,22 +174,20 @@ func (c *fakeAPIClient) Enqueue(args params.Actions) (params.ActionResults, erro
 	return params.ActionResults{Results: c.actionResults}, c.apiErr
 }
 
-func (c *fakeAPIClient) ListAll(args params.Entities) (params.ActionsByReceivers, error) {
-	return params.ActionsByReceivers{
-		Actions: c.actionsByReceivers,
-	}, c.apiErr
-}
-
-func (c *fakeAPIClient) ListPending(args params.Entities) (params.ActionsByReceivers, error) {
-	return params.ActionsByReceivers{
-		Actions: c.actionsByReceivers,
-	}, c.apiErr
-}
-
-func (c *fakeAPIClient) ListCompleted(args params.Entities) (params.ActionsByReceivers, error) {
-	return params.ActionsByReceivers{
-		Actions: c.actionsByReceivers,
-	}, c.apiErr
+func (c *fakeAPIClient) EnqueueOperation(args params.Actions) (params.EnqueuedActions, error) {
+	c.enqueuedActions = args
+	actions := make([]params.StringResult, len(c.actionResults))
+	for i, a := range c.actionResults {
+		actions[i] = params.StringResult{
+			Error: a.Error,
+		}
+		if a.Action != nil {
+			actions[i].Result = a.Action.Tag
+		}
+	}
+	return params.EnqueuedActions{
+		OperationTag: "operation-1",
+		Actions:      actions}, c.apiErr
 }
 
 func (c *fakeAPIClient) Cancel(args params.Entities) (params.ActionResults, error) {
@@ -267,9 +266,9 @@ func (c *fakeAPIClient) WatchActionProgress(actionId string) (watcher.StringsWat
 	return watchertest.NewMockStringsWatcher(c.logMessageCh), nil
 }
 
-func (c *fakeAPIClient) Operations(args params.OperationQueryArgs) (params.ActionResults, error) {
+func (c *fakeAPIClient) Operations(args params.OperationQueryArgs) (params.OperationResults, error) {
 	c.operationQueryArgs = args
-	return params.ActionResults{
-		Results: c.actionResults,
+	return params.OperationResults{
+		Results: c.operationResults,
 	}, c.apiErr
 }

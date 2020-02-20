@@ -337,6 +337,11 @@ func (env *maasEnviron) SupportsSpaces(ctx context.ProviderCallContext) (bool, e
 	return true, nil
 }
 
+// SupportsProviderSpaces is specified on environs.Networking.
+func (env *maasEnviron) SupportsProviderSpaces(ctx context.ProviderCallContext) (bool, error) {
+	return true, nil
+}
+
 // SupportsSpaceDiscovery is specified on environs.Networking.
 func (env *maasEnviron) SupportsSpaceDiscovery(ctx context.ProviderCallContext) (bool, error) {
 	return true, nil
@@ -750,7 +755,7 @@ func (env *maasEnviron) buildSpaceMap(ctx context.ProviderCallContext) (map[stri
 	spaceMap := make(map[string]corenetwork.SpaceInfo)
 	empty := set.Strings{}
 	for _, space := range spaces {
-		jujuName := network.ConvertSpaceName(string(space.Name), empty)
+		jujuName := corenetwork.ConvertSpaceName(string(space.Name), empty)
 		spaceMap[jujuName] = space
 	}
 	return spaceMap, nil
@@ -925,8 +930,6 @@ func (env *maasEnviron) DistributeInstances(
 ) ([]instance.Id, error) {
 	return common.DistributeInstances(env, ctx, candidates, distributionGroup, limitZones)
 }
-
-var availabilityZoneAllocations = common.AvailabilityZoneAllocations
 
 // MaintainInstance is specified in the InstanceBroker interface.
 func (*maasEnviron) MaintainInstance(ctx context.ProviderCallContext, args environs.StartInstanceParams) error {

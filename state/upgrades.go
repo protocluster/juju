@@ -706,7 +706,7 @@ func AddControllerLogCollectionsSizeSettings(pool *StatePool) error {
 	coll, closer := st.db().GetRawCollection(controllersC)
 	defer closer()
 	var doc settingsDoc
-	if err := coll.FindId(controllerSettingsGlobalKey).One(&doc); err != nil {
+	if err := coll.FindId(ControllerSettingsGlobalKey).One(&doc); err != nil {
 		if err == mgo.ErrNotFound {
 			return nil
 		}
@@ -739,7 +739,7 @@ func maybeUpdateSettings(settings map[string]interface{}, key string, value inte
 	return false
 }
 
-// applyToAllModelSettings iterates the model settings documents and applys the
+// applyToAllModelSettings iterates the model settings documents and applies the
 // passed in function to them.  If the function returns 'true' it indicates the
 // settings have been modified, and they should be written back to the
 // database.
@@ -1464,7 +1464,7 @@ func MoveMongoSpaceToHASpaceConfig(pool *StatePool) error {
 
 	mongoSpace := doc.MongoSpaceName
 	if doc.MongoSpaceState == "valid" && mongoSpace != "" {
-		settings, err := readSettings(st.db(), controllersC, controllerSettingsGlobalKey)
+		settings, err := readSettings(st.db(), controllersC, ControllerSettingsGlobalKey)
 		if err != nil {
 			return errors.Annotate(err, "cannot get controller config")
 		}
@@ -2170,7 +2170,7 @@ func AddModelLogsSize(pool *StatePool) error {
 	coll, closer := st.db().GetRawCollection(controllersC)
 	defer closer()
 	var doc settingsDoc
-	if err := coll.FindId(controllerSettingsGlobalKey).One(&doc); err != nil {
+	if err := coll.FindId(ControllerSettingsGlobalKey).One(&doc); err != nil {
 		if err == mgo.ErrNotFound {
 			return nil
 		}
@@ -2811,7 +2811,7 @@ func RemoveControllerConfigMaxLogAgeAndSize(pool *StatePool) error {
 	coll, closer := st.db().GetRawCollection(controllersC)
 	defer closer()
 	var doc settingsDoc
-	if err := coll.FindId(controllerSettingsGlobalKey).One(&doc); err != nil {
+	if err := coll.FindId(ControllerSettingsGlobalKey).One(&doc); err != nil {
 		if err == mgo.ErrNotFound {
 			return nil
 		}
@@ -2835,4 +2835,22 @@ func RemoveControllerConfigMaxLogAgeAndSize(pool *StatePool) error {
 		}}))
 	}
 	return nil
+}
+
+// IncrementTasksSequence adds 1 to the "tasks" sequence.
+// Previously, numbering started at 0, now it starts at 1
+// so we need to ensure that upgraded controllers do not
+// get a conflicting task id.
+func IncrementTasksSequence(pool *StatePool) error {
+	st := pool.SystemState()
+	// Only increment if there's previously been
+	// a request to get a task id.
+	sequenceColl, closer := st.db().GetRawCollection(sequenceC)
+	defer closer()
+	n, err := sequenceColl.FindId(st.docID("tasks")).Count()
+	if err != nil || n == 0 {
+		return errors.Trace(err)
+	}
+	_, err = sequence(st, "tasks")
+	return errors.Trace(err)
 }

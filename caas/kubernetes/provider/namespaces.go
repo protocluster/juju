@@ -4,14 +4,15 @@
 package provider
 
 import (
+	k8sannotations "github.com/juju/juju/core/annotations"
+	"github.com/juju/juju/core/watcher"
+
 	"github.com/juju/errors"
 	core "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
-
-	k8sannotations "github.com/juju/juju/core/annotations"
-	"github.com/juju/juju/core/watcher"
+	"k8s.io/client-go/informers"
 )
 
 var requireAnnotationsForNameSpace = []string{
@@ -34,7 +35,7 @@ func checkNamespaceOwnedByJuju(ns *core.Namespace, annotationMap map[string]stri
 // Namespaces returns names of the namespaces on the cluster.
 func (k *kubernetesClient) Namespaces() ([]string, error) {
 	namespaces := k.client().CoreV1().Namespaces()
-	ns, err := namespaces.List(v1.ListOptions{IncludeUninitialized: true})
+	ns, err := namespaces.List(v1.ListOptions{})
 	if err != nil {
 		return nil, errors.Annotate(err, "listing namespaces")
 	}
@@ -63,7 +64,7 @@ func (k *kubernetesClient) GetNamespace(name string) (*core.Namespace, error) {
 // getNamespaceByName is used internally for bootstrap.
 // Note: it should be never used by something else. "GetNamespace" is what you should use.
 func (k *kubernetesClient) getNamespaceByName(name string) (*core.Namespace, error) {
-	ns, err := k.client().CoreV1().Namespaces().Get(name, v1.GetOptions{IncludeUninitialized: true})
+	ns, err := k.client().CoreV1().Namespaces().Get(name, v1.GetOptions{})
 	if k8serrors.IsNotFound(err) {
 		return nil, errors.NotFoundf("namespace %q", name)
 	}
@@ -81,7 +82,7 @@ func (k *kubernetesClient) SetNamespace(name string) {
 
 // listNamespacesByAnnotations filters namespaces by annotations.
 func (k *kubernetesClient) listNamespacesByAnnotations(annotations k8sannotations.Annotation) ([]core.Namespace, error) {
-	namespaces, err := k.client().CoreV1().Namespaces().List(v1.ListOptions{IncludeUninitialized: true})
+	namespaces, err := k.client().CoreV1().Namespaces().List(v1.ListOptions{})
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -160,15 +161,10 @@ func (k *kubernetesClient) deleteNamespace() error {
 // WatchNamespace returns a watcher which notifies when there
 // are changes to current namespace.
 func (k *kubernetesClient) WatchNamespace() (watcher.NotifyWatcher, error) {
-	w, err := k.client().CoreV1().Namespaces().Watch(
-		v1.ListOptions{
-			FieldSelector:        fields.OneTermEqualSelector("metadata.name", k.namespace).String(),
-			IncludeUninitialized: true,
-		},
+	factory := informers.NewSharedInformerFactoryWithOptions(k.client(), 0,
+		informers.WithTweakListOptions(func(o *v1.ListOptions) {
+			o.FieldSelector = fields.OneTermEqualSelector("metadata.name", k.namespace).String()
+		}),
 	)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	return k.newWatcher(w, k.namespace, k.clock)
+	return k.newWatcher(factory.Core().V1().Namespaces().Informer(), k.namespace, k.clock)
 }

@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/juju/collections/set"
 	"github.com/juju/errors"
 	jujutxn "github.com/juju/txn"
-	"github.com/juju/utils/set"
 	"gopkg.in/juju/charm.v6"
 	"gopkg.in/juju/names.v3"
 	"gopkg.in/mgo.v2"
@@ -509,7 +509,7 @@ func (g *Generation) Abort(userName string) error {
 		assigned := g.AssignedUnits()
 		for _, units := range assigned {
 			if len(units) > 0 {
-				return nil, errors.New("branch is in progress. Either reset values on tracking units or remove them to abort.")
+				return nil, errors.New("branch is in progress. Either reset values on tracking units and commit the branch or remove them to abort.")
 			}
 		}
 

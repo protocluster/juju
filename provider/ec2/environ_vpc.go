@@ -7,11 +7,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/juju/collections/set"
 	"github.com/juju/errors"
 	"gopkg.in/amz.v3/ec2"
 
-	"github.com/juju/juju/core/network"
+	corenetwork "github.com/juju/juju/core/network"
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/environs/context"
 )
@@ -453,9 +452,9 @@ func getVPCSubnetIDsForAvailabilityZone(
 	apiClient vpcAPIClient,
 	ctx context.ProviderCallContext,
 	vpcID, zoneName string,
-	allowedSubnetIDs []string,
-) ([]string, error) {
-	allowedSubnets := set.NewStrings(allowedSubnetIDs...)
+	allowedSubnetIDs []corenetwork.Id,
+) ([]corenetwork.Id, error) {
+	allowedSubnets := corenetwork.MakeSubnetSet(allowedSubnetIDs...)
 	vpc := &ec2.VPC{Id: vpcID}
 	subnets, err := getVPCSubnets(apiClient, ctx, vpc)
 	if err != nil && !isVPCNotUsableError(err) {
@@ -468,17 +467,17 @@ func getVPCSubnetIDsForAvailabilityZone(
 		return nil, errors.NewNotFound(err, message)
 	}
 
-	matchingSubnetIDs := set.NewStrings()
+	matchingSubnetIDs := corenetwork.MakeSubnetSet()
 	for _, subnet := range subnets {
 		if subnet.AvailZone != zoneName {
 			logger.Debugf("skipping subnet %q (in VPC %q): not in the chosen AZ %q", subnet.Id, vpcID, zoneName)
 			continue
 		}
-		if !allowedSubnets.IsEmpty() && !allowedSubnets.Contains(subnet.Id) {
+		if !allowedSubnets.IsEmpty() && !allowedSubnets.Contains(corenetwork.Id(subnet.Id)) {
 			logger.Debugf("skipping subnet %q (in VPC %q, AZ %q): not matching spaces constraints", subnet.Id, vpcID, zoneName)
 			continue
 		}
-		matchingSubnetIDs.Add(subnet.Id)
+		matchingSubnetIDs.Add(corenetwork.Id(subnet.Id))
 	}
 
 	if matchingSubnetIDs.IsEmpty() {
@@ -489,22 +488,6 @@ func getVPCSubnetIDsForAvailabilityZone(
 	sortedIDs := matchingSubnetIDs.SortedValues()
 	logger.Infof("found %d subnets in VPC %q matching AZ %q and constraints: %v", len(sortedIDs), vpcID, zoneName, sortedIDs)
 	return sortedIDs, nil
-}
-
-func findSubnetIDsForAvailabilityZone(zoneName string, subnetsToZones map[network.Id][]string) ([]string, error) {
-	matchingSubnetIDs := set.NewStrings()
-	for subnetID, zones := range subnetsToZones {
-		zonesSet := set.NewStrings(zones...)
-		if zonesSet.Contains(zoneName) {
-			matchingSubnetIDs.Add(string(subnetID))
-		}
-	}
-
-	if matchingSubnetIDs.IsEmpty() {
-		return nil, errors.NotFoundf("subnets in AZ %q", zoneName)
-	}
-
-	return matchingSubnetIDs.SortedValues(), nil
 }
 
 func isVPCIDSetButInvalid(vpcID string) bool {

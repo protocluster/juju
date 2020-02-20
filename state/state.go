@@ -1008,6 +1008,12 @@ func (st *State) FindEntity(tag names.Tag) (Entity, error) {
 			return nil, errors.Trace(err)
 		}
 		return model.ActionByTag(tag)
+	case names.OperationTag:
+		model, err := st.Model()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return model.Operation(tag.Id())
 	case names.CharmTag:
 		if url, err := charm.ParseURL(id); err != nil {
 			logger.Warningf("Parsing charm URL %q failed: %v", id, err)
@@ -2585,4 +2591,22 @@ func (st *State) globalClockReader() (*globalclock.Reader, error) {
 			Collection: globalClockC,
 		},
 	})
+}
+
+// ParseLocalIDToTags tries to parse a DocID e.g. `c9741ea1-0c2a-444d-82f5-787583a48557:a#mediawiki
+// to a corresponding Tag. In the above case -> applicationTag.
+func ParseLocalIDToTags(docID string) names.Tag {
+	_, localID, _ := splitDocID(docID)
+	switch {
+	case strings.HasPrefix(localID, "a#"):
+		return names.NewApplicationTag(localID[2:])
+	case strings.HasPrefix(localID, "m#"):
+		return names.NewMachineTag(localID)
+	case strings.HasPrefix(localID, "u#"):
+		return names.NewUnitTag(localID[2:])
+	case strings.HasPrefix(localID, "e"):
+		return names.NewModelTag(localID)
+	default:
+		return nil
+	}
 }

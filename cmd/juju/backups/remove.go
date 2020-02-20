@@ -7,9 +7,9 @@ import (
 	"fmt"
 
 	"github.com/juju/cmd"
+	"github.com/juju/collections/set"
 	"github.com/juju/errors"
 	"github.com/juju/gnuflag"
-	"github.com/juju/utils/set"
 
 	"github.com/juju/juju/apiserver/params"
 	jujucmd "github.com/juju/juju/cmd"
@@ -73,11 +73,6 @@ func (c *removeCommand) Run(ctx *cmd.Context) error {
 	if err := c.validateIaasController(c.Info().Name); err != nil {
 		return errors.Trace(err)
 	}
-	if c.Log != nil {
-		if err := c.Log.Start(ctx); err != nil {
-			return err
-		}
-	}
 
 	client, apiVersion, err := c.NewGetAPI()
 	if err != nil {
@@ -88,7 +83,6 @@ func (c *removeCommand) Run(ctx *cmd.Context) error {
 	if apiVersion < 2 && c.KeepLatest {
 		return errors.New("--keep-latest is not supported by this controller")
 	}
-	//ctx.Infof("apiversion %d", apiVersion)
 
 	ids := []string{}
 	var keep string

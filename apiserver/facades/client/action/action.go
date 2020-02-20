@@ -4,10 +4,7 @@
 package action
 
 import (
-	"strings"
-
 	"github.com/juju/errors"
-	"github.com/juju/utils/set"
 	"gopkg.in/juju/names.v3"
 
 	"github.com/juju/juju/apiserver/common"
@@ -44,6 +41,11 @@ type APIv4 struct {
 
 // APIv5 provides the Action API facade for version 5.
 type APIv5 struct {
+	*APIv6
+}
+
+// APIv6 provides the Action API facade for version 6.
+type APIv6 struct {
 	*ActionAPI
 }
 
@@ -74,13 +76,22 @@ func NewActionAPIV4(ctx facade.Context) (*APIv4, error) {
 	return &APIv4{api}, nil
 }
 
-// NewActionAPIV5 returns an initialized ActionAPI for version 4.
+// NewActionAPIV5 returns an initialized ActionAPI for version 5.
 func NewActionAPIV5(ctx facade.Context) (*APIv5, error) {
-	api, err := newActionAPI(ctx.State(), ctx.Resources(), ctx.Auth())
+	api, err := NewActionAPIV6(ctx)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 	return &APIv5{api}, nil
+}
+
+// NewActionAPIV6 returns an initialized ActionAPI for version 6.
+func NewActionAPIV6(ctx facade.Context) (*APIv6, error) {
+	api, err := newActionAPI(ctx.State(), ctx.Resources(), ctx.Auth())
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return &APIv6{api}, nil
 }
 
 func newActionAPI(st *state.State, resources facade.Resources, authorizer facade.Authorizer) (*ActionAPI, error) {
@@ -251,205 +262,8 @@ func (a *ActionAPI) FindActionsByNames(arg params.FindActionsByNames) (params.Ac
 // enqueued Action, or an error if there was a problem enqueueing the
 // Action.
 func (a *ActionAPI) Enqueue(arg params.Actions) (params.ActionResults, error) {
-	if err := a.checkCanWrite(); err != nil {
-		return params.ActionResults{}, errors.Trace(err)
-	}
-
-	var leaders map[string]string
-	getLeader := func(appName string) (string, error) {
-		if leaders == nil {
-			var err error
-			leaders, err = a.state.ApplicationLeaders()
-			if err != nil {
-				return "", err
-			}
-		}
-		if leader, ok := leaders[appName]; ok {
-			return leader, nil
-		}
-		return "", errors.Errorf("could not determine leader for %q", appName)
-	}
-
-	tagToActionReceiver := common.TagToActionReceiverFn(a.state.FindEntity)
-	response := params.ActionResults{Results: make([]params.ActionResult, len(arg.Actions))}
-	for i, action := range arg.Actions {
-		currentResult := &response.Results[i]
-		actionReceiver := action.Receiver
-		if strings.HasSuffix(actionReceiver, "leader") {
-			app := strings.Split(actionReceiver, "/")[0]
-			receiverName, err := getLeader(app)
-			if err != nil {
-				currentResult.Error = common.ServerError(err)
-				continue
-			}
-			actionReceiver = names.NewUnitTag(receiverName).String()
-		}
-		receiver, err := tagToActionReceiver(actionReceiver)
-		if err != nil {
-			currentResult.Error = common.ServerError(err)
-			continue
-		}
-		enqueued, err := receiver.AddAction(action.Name, action.Parameters)
-		if err != nil {
-			currentResult.Error = common.ServerError(err)
-			continue
-		}
-
-		response.Results[i] = common.MakeActionResult(receiver.Tag(), enqueued, false)
-	}
-	return response, nil
-}
-
-// ListAll takes a list of Entities representing ActionReceivers and
-// returns all of the Actions that have been enqueued or run by each of
-// those Entities.
-func (a *APIv4) ListAll(arg params.Entities) (params.ActionsByReceivers, error) {
-	return a.listAll(arg, true)
-}
-
-// ListAll takes a list of Entities representing ActionReceivers and
-// returns all of the Actions that have been enqueued or run by each of
-// those Entities.
-func (a *ActionAPI) ListAll(arg params.Entities) (params.ActionsByReceivers, error) {
-	return a.listAll(arg, false)
-}
-
-func (a *ActionAPI) listAll(arg params.Entities, compat bool) (params.ActionsByReceivers, error) {
-	if err := a.checkCanRead(); err != nil {
-		return params.ActionsByReceivers{}, errors.Trace(err)
-	}
-
-	return a.internalList(arg, combine(pendingActions, runningActions, completedActions), compat)
-}
-
-// Operations fetches the called functions (actions) for specified apps/units.
-func (a *ActionAPI) Operations(arg params.OperationQueryArgs) (params.ActionResults, error) {
-	if err := a.checkCanRead(); err != nil {
-		return params.ActionResults{}, errors.Trace(err)
-	}
-
-	unitTags := set.NewStrings()
-	for _, name := range arg.Units {
-		unitTags.Add(names.NewUnitTag(name).String())
-	}
-	appNames := arg.Applications
-	if len(appNames) == 0 && unitTags.Size() == 0 {
-		apps, err := a.state.AllApplications()
-		if err != nil {
-			return params.ActionResults{}, errors.Trace(err)
-		}
-		for _, a := range apps {
-			appNames = append(appNames, a.Name())
-		}
-	}
-	for _, aName := range appNames {
-		app, err := a.state.Application(aName)
-		if err != nil {
-			return params.ActionResults{}, errors.Trace(err)
-		}
-		units, err := app.AllUnits()
-		if err != nil {
-			return params.ActionResults{}, errors.Trace(err)
-		}
-		for _, u := range units {
-			unitTags.Add(u.Tag().String())
-		}
-	}
-
-	var entities params.Entities
-	for _, unitTag := range unitTags.SortedValues() {
-		entities.Entities = append(entities.Entities, params.Entity{Tag: unitTag})
-	}
-
-	statusSet := set.NewStrings(arg.Status...)
-	if statusSet.Size() == 0 {
-		statusSet = set.NewStrings(params.ActionPending, params.ActionRunning, params.ActionCompleted)
-	}
-	var extractorFuncs []extractorFn
-	for _, status := range statusSet.SortedValues() {
-		switch status {
-		case params.ActionPending:
-			extractorFuncs = append(extractorFuncs, pendingActions)
-		case params.ActionRunning:
-			extractorFuncs = append(extractorFuncs, runningActions)
-		case params.ActionCompleted:
-			extractorFuncs = append(extractorFuncs, completedActions)
-		}
-	}
-
-	byReceivers, err := a.internalList(entities, combine(extractorFuncs...), false)
-	if err != nil {
-		return params.ActionResults{}, errors.Trace(err)
-	}
-
-	nameMatches := func(name string, filter []string) bool {
-		if len(filter) == 0 {
-			return true
-		}
-		for _, f := range filter {
-			if f == name {
-				return true
-			}
-		}
-		return false
-	}
-
-	var result params.ActionResults
-	for _, actions := range byReceivers.Actions {
-		if actions.Error != nil {
-			return params.ActionResults{}, errors.Trace(actions.Error)
-		}
-		for _, ar := range actions.Actions {
-			if nameMatches(ar.Action.Name, arg.FunctionNames) {
-				result.Results = append(result.Results, ar)
-			}
-		}
-	}
-	return result, nil
-}
-
-// ListPending takes a list of Entities representing ActionReceivers
-// and returns all of the Actions that are enqueued for each of those
-// Entities.
-func (a *ActionAPI) ListPending(arg params.Entities) (params.ActionsByReceivers, error) {
-	if err := a.checkCanRead(); err != nil {
-		return params.ActionsByReceivers{}, errors.Trace(err)
-	}
-
-	return a.internalList(arg, pendingActions, false)
-}
-
-// ListRunning takes a list of Entities representing ActionReceivers and
-// returns all of the Actions that have are running on each of those
-// Entities.
-func (a *ActionAPI) ListRunning(arg params.Entities) (params.ActionsByReceivers, error) {
-	if err := a.checkCanRead(); err != nil {
-		return params.ActionsByReceivers{}, errors.Trace(err)
-	}
-
-	return a.internalList(arg, runningActions, false)
-}
-
-// ListCompleted takes a list of Entities representing ActionReceivers
-// and returns all of the Actions that have been run on each of those
-// Entities.
-func (a *APIv4) ListCompleted(arg params.Entities) (params.ActionsByReceivers, error) {
-	return a.listCompleted(arg, true)
-}
-
-// ListCompleted takes a list of Entities representing ActionReceivers
-// and returns all of the Actions that have been run on each of those
-// Entities.
-func (a *ActionAPI) ListCompleted(arg params.Entities) (params.ActionsByReceivers, error) {
-	return a.listCompleted(arg, false)
-}
-
-func (a *ActionAPI) listCompleted(arg params.Entities, compat bool) (params.ActionsByReceivers, error) {
-	if err := a.checkCanRead(); err != nil {
-		return params.ActionsByReceivers{}, errors.Trace(err)
-	}
-
-	return a.internalList(arg, completedActions, compat)
+	_, results, err := a.enqueue(arg)
+	return results, err
 }
 
 // Cancel attempts to cancel enqueued Actions from running.
@@ -547,71 +361,6 @@ func (a *ActionAPI) ApplicationsCharmsActions(args params.Entities) (params.Appl
 		}
 	}
 	return result, nil
-}
-
-// internalList takes a list of Entities representing ActionReceivers
-// and returns all of the Actions the extractorFn can get out of the
-// ActionReceiver.
-func (a *ActionAPI) internalList(arg params.Entities, fn extractorFn, compat bool) (params.ActionsByReceivers, error) {
-	tagToActionReceiver := common.TagToActionReceiverFn(a.state.FindEntity)
-	response := params.ActionsByReceivers{Actions: make([]params.ActionsByReceiver, len(arg.Entities))}
-	for i, entity := range arg.Entities {
-		currentResult := &response.Actions[i]
-		receiver, err := tagToActionReceiver(entity.Tag)
-		if err != nil {
-			currentResult.Error = common.ServerError(common.ErrBadId)
-			continue
-		}
-		currentResult.Receiver = receiver.Tag().String()
-
-		results, err := fn(receiver, compat)
-		if err != nil {
-			currentResult.Error = common.ServerError(err)
-			continue
-		}
-		currentResult.Actions = results
-	}
-	return response, nil
-}
-
-// extractorFn is the generic signature for functions that extract
-// state.Actions from an ActionReceiver, and return them as a slice of
-// params.ActionResult.
-type extractorFn func(state.ActionReceiver, bool) ([]params.ActionResult, error)
-
-// combine takes multiple extractorFn's and combines them into one
-// function.
-func combine(funcs ...extractorFn) extractorFn {
-	return func(ar state.ActionReceiver, compat bool) ([]params.ActionResult, error) {
-		result := []params.ActionResult{}
-		for _, fn := range funcs {
-			items, err := fn(ar, compat)
-			if err != nil {
-				return result, errors.Trace(err)
-			}
-			result = append(result, items...)
-		}
-		return result, nil
-	}
-}
-
-// pendingActions iterates through the Actions() enqueued for an
-// ActionReceiver, and converts them to a slice of params.ActionResult.
-func pendingActions(ar state.ActionReceiver, compat bool) ([]params.ActionResult, error) {
-	return common.ConvertActions(ar, ar.PendingActions, compat)
-}
-
-// runningActions iterates through the Actions() running on an
-// ActionReceiver, and converts them to a slice of params.ActionResult.
-func runningActions(ar state.ActionReceiver, compat bool) ([]params.ActionResult, error) {
-	return common.ConvertActions(ar, ar.RunningActions, compat)
-}
-
-// completedActions iterates through the Actions() that have run to
-// completion for an ActionReceiver, and converts them to a slice of
-// params.ActionResult.
-func completedActions(ar state.ActionReceiver, compat bool) ([]params.ActionResult, error) {
-	return common.ConvertActions(ar, ar.CompletedActions, compat)
 }
 
 // WatchActionsProgress creates a watcher that reports on action log messages.

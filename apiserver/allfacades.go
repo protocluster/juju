@@ -134,6 +134,7 @@ func AllFacades() *facade.Registry {
 	reg("Action", 3, action.NewActionAPIV3)
 	reg("Action", 4, action.NewActionAPIV4)
 	reg("Action", 5, action.NewActionAPIV5)
+	reg("Action", 6, action.NewActionAPIV6)
 	reg("ActionPruner", 1, actionpruner.NewAPI)
 	reg("Agent", 2, agent.NewAgentAPIV2)
 	reg("AgentTools", 1, agenttools.NewFacade)
@@ -274,11 +275,12 @@ func AllFacades() *facade.Registry {
 	reg("Pinger", 1, NewPinger)
 	reg("Provisioner", 3, provisioner.NewProvisionerAPIV4) // Yes this is weird.
 	reg("Provisioner", 4, provisioner.NewProvisionerAPIV4)
-	reg("Provisioner", 5, provisioner.NewProvisionerAPIV5) // v5 adds DistributionGroupByMachineId()
-	reg("Provisioner", 6, provisioner.NewProvisionerAPIV6) // v6 adds more proxy settings
-	reg("Provisioner", 7, provisioner.NewProvisionerAPIV7) // v7 adds charm profile watcher
-	reg("Provisioner", 8, provisioner.NewProvisionerAPIV8) // v8 adds changes charm profile and modification status
-	reg("Provisioner", 9, provisioner.NewProvisionerAPIV9) // v9 adds supported containers
+	reg("Provisioner", 5, provisioner.NewProvisionerAPIV5)   // v5 adds DistributionGroupByMachineId()
+	reg("Provisioner", 6, provisioner.NewProvisionerAPIV6)   // v6 adds more proxy settings
+	reg("Provisioner", 7, provisioner.NewProvisionerAPIV7)   // v7 adds charm profile watcher
+	reg("Provisioner", 8, provisioner.NewProvisionerAPIV8)   // v8 adds changes charm profile and modification status
+	reg("Provisioner", 9, provisioner.NewProvisionerAPIV9)   // v9 adds supported containers
+	reg("Provisioner", 10, provisioner.NewProvisionerAPIV10) // v10 adds support for multiple space constraints.
 
 	reg("ProxyUpdater", 1, proxyupdater.NewFacadeV1)
 	reg("ProxyUpdater", 2, proxyupdater.NewFacadeV2)
@@ -299,7 +301,8 @@ func AllFacades() *facade.Registry {
 	reg("Spaces", 2, spaces.NewAPIv2)
 	reg("Spaces", 3, spaces.NewAPIv3)
 	reg("Spaces", 4, spaces.NewAPIv4)
-	reg("Spaces", 5, spaces.NewAPI)
+	reg("Spaces", 5, spaces.NewAPIv5)
+	reg("Spaces", 6, spaces.NewAPI)
 
 	reg("StatusHistory", 2, statushistory.NewAPI)
 
@@ -325,7 +328,8 @@ func AllFacades() *facade.Registry {
 	reg("Uniter", 11, uniter.NewUniterAPIV11)
 	reg("Uniter", 12, uniter.NewUniterAPIV12)
 	reg("Uniter", 13, uniter.NewUniterAPIV13)
-	reg("Uniter", 14, uniter.NewUniterAPI)
+	reg("Uniter", 14, uniter.NewUniterAPIV14)
+	reg("Uniter", 15, uniter.NewUniterAPI)
 
 	reg("Upgrader", 1, upgrader.NewUpgraderFacade)
 	reg("UpgradeSeries", 1, upgradeseries.NewAPI)

@@ -71,7 +71,7 @@ leader.
 
 // SetFlags is part of the cmd.Command interface.
 func (c *RelationGetCommand) SetFlags(f *gnuflag.FlagSet) {
-	c.out.AddFlags(f, "smart", cmd.DefaultFormatters)
+	c.out.AddFlags(f, "smart", cmd.DefaultFormatters.Formatters())
 	f.Var(c.relationIdProxy, "r", "Specify a relation by id")
 	f.Var(c.relationIdProxy, "relation", "")
 
@@ -179,7 +179,23 @@ func (c *RelationGetCommand) Run(ctx *cmd.Context) error {
 	} else {
 		var err error
 		if c.Application {
-			settings, err = r.ReadApplicationSettings(c.UnitOrAppName)
+			// Check if the unit tries to access the remote app's
+			// databag or it tries to access the databag for its
+			// own application.
+			localAppName, pErr := names.UnitApplication(c.ctx.UnitName())
+			if pErr != nil {
+				return pErr
+			}
+
+			if c.UnitOrAppName == localAppName {
+				appSettings, readErr := r.ApplicationSettings()
+				if readErr != nil {
+					return readErr
+				}
+				settings = appSettings.Map()
+			} else {
+				settings, err = r.ReadApplicationSettings(c.UnitOrAppName)
+			}
 		} else {
 			settings, err = r.ReadSettings(c.UnitOrAppName)
 		}

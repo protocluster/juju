@@ -35,10 +35,10 @@ func (c *Client) Actions(arg params.Entities) (params.ActionResults, error) {
 	return results, err
 }
 
-// Operations fetches the called functions (actions) for specified apps/units.
-func (c *Client) Operations(arg params.OperationQueryArgs) (params.ActionResults, error) {
-	results := params.ActionResults{}
-	if v := c.BestAPIVersion(); v < 5 {
+// Operations fetches the called operations for specified apps/units.
+func (c *Client) Operations(arg params.OperationQueryArgs) (params.OperationResults, error) {
+	results := params.OperationResults{}
+	if v := c.BestAPIVersion(); v < 6 {
 		return results, errors.Errorf("Operations not supported by this version (%d) of Juju", v)
 	}
 	err := c.facade.FacadeCall("Operations", arg, &results)
@@ -66,38 +66,23 @@ func (c *Client) Enqueue(arg params.Actions) (params.ActionResults, error) {
 	return results, err
 }
 
+// EnqueueOperation takes a list of Actions and queues them up to be executed as
+// an operation, each action running as a task on the the designated ActionReceiver.
+// We return the ID of the overall operation and each individual task.
+func (c *Client) EnqueueOperation(arg params.Actions) (params.EnqueuedActions, error) {
+	results := params.EnqueuedActions{}
+	if v := c.BestAPIVersion(); v < 6 {
+		return results, errors.Errorf("EnqueueOperation not supported by this version (%d) of Juju", v)
+	}
+	err := c.facade.FacadeCall("EnqueueOperation", arg, &results)
+	return results, err
+}
+
 // FindActionsByNames takes a list of action names and returns actions for
 // every name.
 func (c *Client) FindActionsByNames(arg params.FindActionsByNames) (params.ActionsByNames, error) {
 	results := params.ActionsByNames{}
 	err := c.facade.FacadeCall("FindActionsByNames", arg, &results)
-	return results, err
-}
-
-// ListAll takes a list of Entities representing ActionReceivers and returns
-// all of the Actions that have been queued or run by each of those
-// Entities.
-func (c *Client) ListAll(arg params.Entities) (params.ActionsByReceivers, error) {
-	results := params.ActionsByReceivers{}
-	err := c.facade.FacadeCall("ListAll", arg, &results)
-	return results, err
-}
-
-// ListPending takes a list of Entities representing ActionReceivers
-// and returns all of the Actions that are queued for each of those
-// Entities.
-func (c *Client) ListPending(arg params.Entities) (params.ActionsByReceivers, error) {
-	results := params.ActionsByReceivers{}
-	err := c.facade.FacadeCall("ListPending", arg, &results)
-	return results, err
-}
-
-// ListCompleted takes a list of Entities representing ActionReceivers
-// and returns all of the Actions that have been run on each of those
-// Entities.
-func (c *Client) ListCompleted(arg params.Entities) (params.ActionsByReceivers, error) {
-	results := params.ActionsByReceivers{}
-	err := c.facade.FacadeCall("ListCompleted", arg, &results)
 	return results, err
 }
 

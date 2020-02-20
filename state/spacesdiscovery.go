@@ -110,7 +110,7 @@ func (st *State) SaveSubnetsFromProvider(subnets []corenetwork.SubnetInfo, space
 				return errors.Trace(err)
 			}
 			subnetWithDashes := strings.Replace(strings.Replace(subnetNet.String(), ".", "-", -1), "/", "-", -1)
-			id := fmt.Sprintf("%s-INFAN-%s", subnet.ProviderId, subnetWithDashes)
+			id := fmt.Sprintf("%s-%s-%s", subnet.ProviderId, corenetwork.InFan, subnetWithDashes)
 			if modelSubnetIds.Contains(id) {
 				continue
 			}
@@ -165,7 +165,7 @@ func (st *State) SaveSpacesFromProvider(providerSpaces []corenetwork.SpaceInfo) 
 		} else {
 			// The space is new, we need to create a valid name for it in state.
 			// Convert the name into a valid name that is not already in use.
-			spaceName := network.ConvertSpaceName(string(spaceInfo.Name), spaceNames)
+			spaceName := corenetwork.ConvertSpaceName(string(spaceInfo.Name), spaceNames)
 
 			logger.Debugf("Adding space %s from provider %s", spaceName, string(spaceInfo.ProviderId))
 			space, err := st.AddSpace(spaceName, spaceInfo.ProviderId, []string{}, false)
