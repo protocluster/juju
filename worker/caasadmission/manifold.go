@@ -63,7 +63,9 @@ func (c ManifoldConfig) Start(context dependency.Context) (worker.Worker, error)
 	currentConfig := agent.CurrentConfig()
 	admissionPath := k8s.AdmissionPathForModel(currentConfig.Model().Id())
 	port := int32(17070)
-	admissionCreator, err := k8s.NewAdmissionCreator(c.CertWatcher, k8sClient,
+	admissionCreator, err := k8s.NewAdmissionCreator(c.CertWatcher,
+		k8sClient.GetCurrentNamespace(), k8sClient.GetCurrentModel(),
+		k8sClient.EnsureMutatingWebhookConfiguration,
 		&admission.ServiceReference{
 			Name:      "controller-service",
 			Namespace: "controller-microk8s-localhost",

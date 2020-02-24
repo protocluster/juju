@@ -8,9 +8,13 @@ import (
 	"github.com/juju/errors"
 	"gopkg.in/juju/worker.v1/catacomb"
 
-	"github.com/juju/juju/apiserver/apiserverhttp"
 	"github.com/juju/juju/caas/kubernetes/provider"
 )
+
+type Mux interface {
+	AddHandler(string, string, http.Handler) error
+	RemoveHandler(string, string)
+}
 
 type Logger interface {
 	Debugf(string, ...interface{})
@@ -18,11 +22,12 @@ type Logger interface {
 	Infof(string, ...interface{})
 }
 
+// Kubernetes controller responsible
 type Controller struct {
 	admissionCreator AdmissionCreator
 	catacomb         catacomb.Catacomb
 	logger           Logger
-	mux              *apiserverhttp.Mux
+	mux              Mux
 	path             string
 	rbacMapper       provider.RBACMapper
 }
@@ -33,7 +38,7 @@ func AdmissionPathForModel(modelUUID string) string {
 
 func NewController(
 	logger Logger,
-	mux *apiserverhttp.Mux,
+	mux Mux,
 	path string,
 	admissionCreator AdmissionCreator,
 	rbacMapper provider.RBACMapper) (*Controller, error) {
@@ -66,7 +71,7 @@ func (c *Controller) Kill() {
 
 func (c *Controller) loop() error {
 	if err := c.mux.AddHandler(http.MethodPost, c.path,
-		admissionHandler(c.logger)); err != nil {
+		admissionHandler(c.logger, c.rbacMapper)); err != nil {
 		return errors.Trace(err)
 	}
 	defer c.mux.RemoveHandler(http.MethodPost, c.path)

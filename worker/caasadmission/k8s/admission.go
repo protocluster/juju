@@ -39,7 +39,8 @@ func (a AdmissionCreatorFunc) EnsureMutatingWebhookConfiguration() (func(), erro
 // Instantiates a new AdmissionCreator for the supplied context arguments.
 func NewAdmissionCreator(
 	certWatcher func() *tls.Certificate,
-	k8sClient *provider.KubernetesClient,
+	namespace, model string,
+	ensureConfig func(*admission.MutatingWebhookConfiguration) (func(), error),
 	service *admission.ServiceReference) (AdmissionCreator, error) {
 
 	caPems := &bytes.Buffer{}
@@ -68,9 +69,9 @@ func NewAdmissionCreator(
 	// MutatingWebjook Obj
 	obj := admission.MutatingWebhookConfiguration{
 		ObjectMeta: meta.ObjectMeta{
-			Labels:    provider.LabelsForModel(k8sClient.GetCurrentModel()),
-			Name:      fmt.Sprintf("%s-model-admission", k8sClient.GetCurrentModel()),
-			Namespace: k8sClient.GetCurrentNamespace(),
+			Labels:    provider.LabelsForModel(model),
+			Name:      fmt.Sprintf("%s-model-admission", model),
+			Namespace: namespace,
 		},
 		Webhooks: []admission.MutatingWebhook{
 			admission.MutatingWebhook{
@@ -81,6 +82,9 @@ func NewAdmissionCreator(
 				FailurePolicy: &failurePolicy,
 				MatchPolicy:   &matchPolicy,
 				Name:          provider.MakeK8sDomain(Component),
+				NamespaceSelector: &meta.LabelSelector{
+					MatchLabels: provider.LabelsForModel(model),
+				},
 				Rules: []admission.RuleWithOperations{
 					admission.RuleWithOperations{
 						Operations: []admission.OperationType{
@@ -99,6 +103,6 @@ func NewAdmissionCreator(
 		},
 	}
 	return AdmissionCreatorFunc(func() (func(), error) {
-		return k8sClient.EnsureMutatingWebhookConfiguration(&obj)
+		return ensureConfig(&obj)
 	}), nil
 }

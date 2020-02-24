@@ -6,8 +6,9 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	"github.com/juju/errors"
+	"github.com/juju/juju/caas/kubernetes/provider"
 
+	"github.com/juju/errors"
 	admission "k8s.io/api/admission/v1beta1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,7 +30,7 @@ var (
 	}
 )
 
-func admissionHandler(logger Logger) http.Handler {
+func admissionHandler(logger Logger, rbacMapper provider.RBACMapper) http.Handler {
 	codecFactory := serializer.NewCodecFactory(runtime.NewScheme())
 
 	return http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
@@ -54,45 +55,55 @@ func admissionHandler(logger Logger) http.Handler {
 			return
 		}
 
-		var reviewResponse *admission.AdmissionResponse
-		var admissionReview *admission.AdmissionReview
-		obj, gvk, err := codecFactory.UniversalDecoder().Decode(data, nil, nil)
-		if err != nil {
-			reviewResponse = errToAdmissionResponse(err)
-		}
+		finalise := func(review *admission.AdmissionReview, response *admission.AdmissionResponse) {
+			var uid types.UID
+			if review != nil {
+				uid = review.Request.UID
+			}
+			response.UID = uid
 
-		if !compareGroupVersionKind(&AdmissionGVK, gvk) {
-			reviewResponse = errToAdmissionResponse(errors.NewNotValid(nil, "unsupported group kind version"))
-		} else {
-			var ok bool
-			if admissionReview, ok = obj.(*admission.AdmissionReview); !ok {
-				reviewResponse = errToAdmissionResponse(errors.NewNotValid(nil, "converting admission request"))
+			body, err := json.Marshal(admission.AdmissionReview{
+				Response: response,
+			})
+			if err != nil {
+				logger.Errorf("marshaling admission request response body: %v", err)
+				http.Error(res, fmt.Sprintf("%s: building response body",
+					http.StatusText(http.StatusInternalServerError)), http.StatusInternalServerError)
+			}
+			if _, err := res.Write(body); err != nil {
+				logger.Errorf("writing admission request response body: %v", err)
 			}
 		}
 
-		var uid types.UID
-		if admissionReview != nil {
-			uid = admissionReview.Request.UID
-		}
-
-		if reviewResponse == nil {
-			reviewResponse = &admission.AdmissionResponse{}
-		}
-
-		reviewResponse.UID = uid
-		response := admission.AdmissionReview{
-			Response: reviewResponse,
-		}
-
-		body, err := json.Marshal(response)
+		var admissionReview *admission.AdmissionReview
+		obj, gvk, err := codecFactory.UniversalDecoder().Decode(data, nil, nil)
 		if err != nil {
-			logger.Errorf("marshaling admission request response body: %v", err)
-			http.Error(res, fmt.Sprintf("%s: building response body",
-				http.StatusText(http.StatusInternalServerError)), http.StatusInternalServerError)
+			finalise(admissionReview, errToAdmissionResponse(err))
+			return
 		}
-		if _, err := res.Write(body); err != nil {
-			logger.Errorf("writing admission request response body: %v", err)
+
+		if !compareGroupVersionKind(&AdmissionGVK, gvk) {
+			finalise(admissionReview,
+				errToAdmissionResponse(errors.NewNotValid(nil, "unsupported group kind version")))
+			return
+		} else {
+			var ok bool
+			if admissionReview, ok = obj.(*admission.AdmissionReview); !ok {
+				finalise(admissionReview,
+					errToAdmissionResponse(errors.NewNotValid(nil, "converting admission request")))
+				return
+			}
 		}
+
+		_, err = rbacMapper.AppNameForServiceAccount(
+			types.UID(admissionReview.Request.UserInfo.UID))
+		if err != nil && !errors.IsNotValid(err) {
+			finalise(admissionReview, errToAdmissionResponse(err))
+			return
+		}
+
+		reviewResponse := &admission.AdmissionResponse{}
+		finalise(admissionReview, reviewResponse)
 	})
 }
 

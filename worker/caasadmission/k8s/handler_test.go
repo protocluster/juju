@@ -8,19 +8,26 @@ import (
 	"strings"
 	"testing"
 
+	k8stest "github.com/juju/juju/caas/kubernetes/provider/test"
+
+	"github.com/juju/loggo"
+	gc "gopkg.in/check.v1"
 	admission "k8s.io/api/admission/v1beta1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-
-	gc "gopkg.in/check.v1"
 )
 
 type HandlerSuite struct {
+	logger Logger
 }
 
 var _ = gc.Suite(&HandlerSuite{})
 
 func TestHandlerSuite(t *testing.T) { gc.TestingT(t) }
+
+func (h *HandlerSuite) SetupTest(c *gc.C) {
+	h.logger = loggo.Logger{}
+}
 
 func (h *HandlerSuite) TestCompareGroupVersionKind(c *gc.C) {
 	tests := []struct {
@@ -70,26 +77,26 @@ func (h *HandlerSuite) TestCompareGroupVersionKind(c *gc.C) {
 	}
 }
 
-func (k *HandlerSuite) TestEmptyBodyFails(c *gc.C) {
+func (h *HandlerSuite) TestEmptyBodyFails(c *gc.C) {
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
 	recorder := httptest.NewRecorder()
 
-	admissionHandler().ServeHTTP(recorder, req)
+	admissionHandler(h.logger, &k8stest.RBACMapper{}).ServeHTTP(recorder, req)
 
 	c.Assert(recorder.Code, gc.Equals, http.StatusBadRequest)
 }
 
-func (k *HandlerSuite) TestUnknownContentType(c *gc.C) {
+func (h *HandlerSuite) TestUnknownContentType(c *gc.C) {
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("junk"))
 	req.Header.Set("junk", "junk")
 	recorder := httptest.NewRecorder()
 
-	admissionHandler().ServeHTTP(recorder, req)
+	admissionHandler(h.logger, &k8stest.RBACMapper{}).ServeHTTP(recorder, req)
 
 	c.Assert(recorder.Code, gc.Equals, http.StatusUnsupportedMediaType)
 }
 
-func (k *HandlerSuite) TestUnsupportedGroupKindVersion(c *gc.C) {
+func (h *HandlerSuite) TestUnsupportedGroupKindVersion(c *gc.C) {
 	admissionRequest := &admission.AdmissionRequest{
 		Kind: meta.GroupVersionKind{
 			Group:   AdmissionGVK.Group,
@@ -105,6 +112,6 @@ func (k *HandlerSuite) TestUnsupportedGroupKindVersion(c *gc.C) {
 	req.Header.Set(HeaderContentType, ExpectedContentType)
 	recorder := httptest.NewRecorder()
 
-	admissionHandler().ServeHTTP(recorder, req)
+	admissionHandler(h.logger, &k8stest.RBACMapper{}).ServeHTTP(recorder, req)
 	c.Assert(recorder.Code, gc.Equals, http.StatusOK)
 }
