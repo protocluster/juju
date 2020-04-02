@@ -11,8 +11,10 @@ import (
 	"github.com/juju/errors"
 	"github.com/juju/schema"
 	core "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8slabels "k8s.io/apimachinery/pkg/labels"
 
 	"github.com/juju/juju/environs/context"
 	"github.com/juju/juju/storage"
@@ -70,6 +72,32 @@ func (k *kubernetesClient) StorageProvider(t storage.ProviderType) (storage.Prov
 		return &storageProvider{k}, nil
 	}
 	return nil, errors.NotFoundf("storage provider %q", t)
+}
+
+func (k *kubernetesClient) deleteStorageClasses(selector k8slabels.Selector) error {
+	err := k.client().StorageV1().StorageClasses().DeleteCollection(&v1.DeleteOptions{
+		PropagationPolicy: &defaultPropagationPolicy,
+	}, v1.ListOptions{
+		LabelSelector: selector.String(),
+	})
+	if k8serrors.IsNotFound(err) {
+		return nil
+	}
+	return errors.Annotate(err, "deleting model storage classes")
+}
+
+func (k *kubernetesClient) listStorageClasses(selector k8slabels.Selector) ([]storagev1.StorageClass, error) {
+	listOps := v1.ListOptions{
+		LabelSelector: selector.String(),
+	}
+	list, err := k.client().StorageV1().StorageClasses().List(listOps)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if len(list.Items) == 0 {
+		return nil, errors.NotFoundf("storage classes with selector %q", selector)
+	}
+	return list.Items, nil
 }
 
 type storageProvider struct {

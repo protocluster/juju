@@ -4,6 +4,9 @@
 package provider
 
 import (
+	"context"
+	"sync"
+
 	jc "github.com/juju/testing/checkers"
 	gc "gopkg.in/check.v1"
 	core "k8s.io/api/core/v1"
@@ -23,21 +26,27 @@ import (
 )
 
 var (
-	PrepareWorkloadSpec     = prepareWorkloadSpec
-	OperatorPod             = operatorPod
-	ExtractRegistryURL      = extractRegistryURL
-	CreateDockerConfigJSON  = createDockerConfigJSON
-	NewStorageConfig        = newStorageConfig
-	CompileK8sCloudCheckers = compileK8sCloudCheckers
-	ControllerCorelation    = controllerCorelation
-	GetLocalMicroK8sConfig  = getLocalMicroK8sConfig
-	AttemptMicroK8sCloud    = attemptMicroK8sCloudInternal
-	EnsureMicroK8sSuitable  = ensureMicroK8sSuitable
-	NewK8sBroker            = newK8sBroker
-	ToYaml                  = toYaml
-	Indent                  = indent
-	ProcessSecretData       = processSecretData
-	PushUniqVolume          = pushUniqVolume
+	PrepareWorkloadSpec    = prepareWorkloadSpec
+	OperatorPod            = operatorPod
+	ExtractRegistryURL     = extractRegistryURL
+	CreateDockerConfigJSON = createDockerConfigJSON
+	NewStorageConfig       = newStorageConfig
+	ControllerCorelation   = controllerCorelation
+	GetLocalMicroK8sConfig = getLocalMicroK8sConfig
+	AttemptMicroK8sCloud   = attemptMicroK8sCloudInternal
+	EnsureMicroK8sSuitable = ensureMicroK8sSuitable
+	NewK8sBroker           = newK8sBroker
+	ToYaml                 = toYaml
+	Indent                 = indent
+	ProcessSecretData      = processSecretData
+	PushUniqVolume         = pushUniqVolume
+
+	CompileK8sCloudCheckers                    = compileK8sCloudCheckers
+	CompileLifecycleApplicationRemovalSelector = compileLifecycleApplicationRemovalSelector
+	CompileLifecycleModelTeardownSelector      = compileLifecycleModelTeardownSelector
+
+	LabelSetToRequirements = labelSetToRequirements
+	MergeSelectors         = mergeSelectors
 )
 
 type (
@@ -132,6 +141,14 @@ func (k *kubernetesClient) ConfigurePodFiles(
 	cfgMapName configMapNameFunc,
 ) error {
 	return k.configurePodFiles(appName, annotations, workloadSpec, containers, cfgMapName)
+}
+
+func (k *kubernetesClient) DeleteClusterScopeResourcesModelTeardown(ctx context.Context, wg *sync.WaitGroup, errChan chan<- error) {
+	k.deleteClusterScopeResourcesModelTeardown(ctx, wg, errChan)
+}
+
+func (k *kubernetesClient) DeleteNamespaceModelTeardown(ctx context.Context, wg *sync.WaitGroup, errChan chan<- error) {
+	k.deleteNamespaceModelTeardown(ctx, wg, errChan)
 }
 
 func StorageProvider(k8sClient kubernetes.Interface, namespace string) storage.Provider {

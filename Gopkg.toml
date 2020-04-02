@@ -86,7 +86,7 @@
   name = "github.com/juju/naturalsort"
 
 [[constraint]]
-  revision = "a3d14ebcfc135bea4a3e437176f2ddb50c6ffad4"
+  revision = "ec2036930a9073141bb489423b4a5a7ff13a00c8"
   name = "github.com/juju/os"
 
 [[constraint]]
@@ -123,7 +123,7 @@
 
 [[constraint]]
   name = "github.com/lxc/lxd"
-  revision = "3a5f63bc49591c4cb62268f210b07ff8e74b727d"
+  revision = "582edb00c72c6bedfa55c2191bbd395512cb0823"
 
 [[constraint]]
   name = "github.com/oracle/oci-go-sdk"
@@ -191,11 +191,7 @@
 
 [[constraint]]
   name = "github.com/Azure/azure-sdk-for-go"
-  revision = "9699bdefa481d47c5c7638a1cc05d87ce53601fd"
-
-[[override]]
-  name = "github.com/Azure/go-autorest"
-  revision = "528b76fd0ebec0682f3e3da7c808cd472b999615"
+  revision = "090dc0ee4d8d2d60e2a9525774d967a4111a2b0c"
 
 [[override]]
   name = "github.com/ajstarks/svgo"
@@ -444,7 +440,7 @@
 
 [[constraint]]
   name = "golang.org/x/crypto"
-  revision = "f027049dab0ad238e394a753dba2d14753473a04"
+  revision = "69ecbb4d6d5dab05e49161c6e77ea40a030884e1"
 
 [[constraint]]
   name = "golang.org/x/net"
@@ -456,7 +452,7 @@
 
 [[constraint]]
   name = "golang.org/x/sys"
-  revision = "0cf1ed9e522b7dbb416f080a5c8003de9b702bf4"
+  revision = "915c9c3d4ccf72b2ceac5e8303d722b16b699366"
 
 [[override]]
   name = "golang.org/x/text"
@@ -472,7 +468,7 @@
 
 [[constraint]]
   name = "gopkg.in/goose.v2"
-  revision = "cc624cc0ae77ab888b42b3084ad915c9e5e12bbc"
+  revision = "ab914003d547f0dc01c26ac8421c55c6b1d66ace"
 
 [[override]]
   name = "gopkg.in/httprequest.v1"

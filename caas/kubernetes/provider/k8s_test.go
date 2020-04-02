@@ -10,20 +10,22 @@ import (
 	"github.com/golang/mock/gomock"
 	jujuclock "github.com/juju/clock"
 	"github.com/juju/errors"
+	"github.com/juju/juju/core/network"
 	jc "github.com/juju/testing/checkers"
 	"github.com/juju/version"
 	gc "gopkg.in/check.v1"
 	"gopkg.in/juju/names.v3"
 	"gopkg.in/juju/worker.v1/workertest"
+	admissionregistrationv1beta1 "k8s.io/api/admissionregistration/v1beta1"
 	apps "k8s.io/api/apps/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	core "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	k8sstorage "k8s.io/api/storage/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -53,6 +55,10 @@ var _ = gc.Suite(&K8sSuite{})
 
 func float64Ptr(f float64) *float64 {
 	return &f
+}
+
+func intPtr(i int) *int {
+	return &i
 }
 
 func int32Ptr(i int32) *int32 {
@@ -100,11 +106,8 @@ func (s *K8sSuite) TestPushUniqVolume(c *gc.C) {
 
 func (s *K8sSuite) TestPrepareWorkloadSpecNoConfigConfig(c *gc.C) {
 
-	sa := &specs.ServiceAccountSpec{}
-	sa.AutomountServiceAccountToken = boolPtr(true)
-
 	podSpec := specs.PodSpec{
-		ServiceAccount: sa,
+		ServiceAccount: primeServiceAccount,
 	}
 
 	podSpec.ProviderPod = &k8sspecs.K8sPodSpec{
@@ -208,11 +211,8 @@ func (s *K8sSuite) TestPrepareWorkloadSpecNoConfigConfig(c *gc.C) {
 
 func (s *K8sSuite) TestPrepareWorkloadSpecWithEnvAndEnvFrom(c *gc.C) {
 
-	sa := &specs.ServiceAccountSpec{}
-	sa.AutomountServiceAccountToken = boolPtr(true)
-
 	podSpec := specs.PodSpec{
-		ServiceAccount: sa,
+		ServiceAccount: primeServiceAccount,
 	}
 
 	podSpec.ProviderPod = &k8sspecs.K8sPodSpec{
@@ -585,6 +585,23 @@ var basicHeadlessServiceArg = &core.Service{
 	},
 }
 
+var primeServiceAccount = &specs.PrimeServiceAccountSpecV3{
+	ServiceAccountSpecV3: specs.ServiceAccountSpecV3{
+		AutomountServiceAccountToken: boolPtr(true),
+		Roles: []specs.Role{
+			{
+				Rules: []specs.PolicyRule{
+					{
+						APIGroups: []string{""},
+						Resources: []string{"pods"},
+						Verbs:     []string{"get", "watch", "list"},
+					},
+				},
+			},
+		},
+	},
+}
+
 func (s *K8sBrokerSuite) getOCIImageSecret(c *gc.C, annotations map[string]string) *core.Secret {
 	secretData, err := provider.CreateDockerConfigJSON(&getBasicPodspec().Containers[0].ImageDetails)
 	c.Assert(err, jc.ErrorIsNil)
@@ -805,7 +822,6 @@ func (s *K8sBrokerSuite) TestFileSetToVolumeNonFiles(c *gc.C) {
 					ConfigMap: &specs.ResourceRefVol{
 						Name:        "log-config",
 						DefaultMode: int32Ptr(511),
-						Optional:    boolPtr(true),
 						Files: []specs.FileRef{
 							{
 								Key:  "log_level",
@@ -826,7 +842,6 @@ func (s *K8sBrokerSuite) TestFileSetToVolumeNonFiles(c *gc.C) {
 								Name: "log-config",
 							},
 							DefaultMode: int32Ptr(511),
-							Optional:    boolPtr(true),
 							Items: []core.KeyToPath{
 								{
 									Key:  "log_level",
@@ -847,7 +862,6 @@ func (s *K8sBrokerSuite) TestFileSetToVolumeNonFiles(c *gc.C) {
 					ConfigMap: &specs.ResourceRefVol{
 						Name:        "non-existing-config-map",
 						DefaultMode: int32Ptr(511),
-						Optional:    boolPtr(true),
 						Files: []specs.FileRef{
 							{
 								Key:  "log_level",
@@ -870,7 +884,6 @@ func (s *K8sBrokerSuite) TestFileSetToVolumeNonFiles(c *gc.C) {
 					Secret: &specs.ResourceRefVol{
 						Name:        "mysecret2",
 						DefaultMode: int32Ptr(511),
-						Optional:    boolPtr(true),
 						Files: []specs.FileRef{
 							{
 								Key:  "password",
@@ -889,7 +902,6 @@ func (s *K8sBrokerSuite) TestFileSetToVolumeNonFiles(c *gc.C) {
 						Secret: &core.SecretVolumeSource{
 							SecretName:  "mysecret2",
 							DefaultMode: int32Ptr(511),
-							Optional:    boolPtr(true),
 							Items: []core.KeyToPath{
 								{
 									Key:  "password",
@@ -910,7 +922,6 @@ func (s *K8sBrokerSuite) TestFileSetToVolumeNonFiles(c *gc.C) {
 					Secret: &specs.ResourceRefVol{
 						Name:        "non-existing-secret",
 						DefaultMode: int32Ptr(511),
-						Optional:    boolPtr(true),
 						Files: []specs.FileRef{
 							{
 								Key:  "password",
@@ -1181,7 +1192,7 @@ func (s *K8sBrokerSuite) TestBootstrap(c *gc.C) {
 		SupportedBootstrapSeries: testing.FakeSupportedJujuSeries,
 	}
 
-	sc := &k8sstorage.StorageClass{
+	sc := &storagev1.StorageClass{
 		ObjectMeta: v1.ObjectMeta{
 			Name: "some-storage",
 		},
@@ -1219,7 +1230,7 @@ func (s *K8sBrokerSuite) TestPrepareForBootstrap(c *gc.C) {
 	// Ensure the broker is configured with operator storage.
 	s.setupOperatorStorageConfig(c)
 
-	sc := &k8sstorage.StorageClass{
+	sc := &storagev1.StorageClass{
 		ObjectMeta: v1.ObjectMeta{
 			Name: "some-storage",
 		},
@@ -1326,39 +1337,282 @@ func (s *K8sBrokerSuite) assertDestroy(c *gc.C, isController bool, destroyFunc f
 	ctrl := s.setupController(c)
 	defer ctrl.Finish()
 
+	// CRs of this Cluster scope CRD will get deleted.
+	crdClusterScope := &apiextensionsv1beta1.CustomResourceDefinition{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "tfjobs.kubeflow.org",
+			Namespace: "test",
+			Labels:    map[string]string{"juju-app": "app-name", "juju-model": "test"},
+		},
+		Spec: apiextensionsv1beta1.CustomResourceDefinitionSpec{
+			Group:   "kubeflow.org",
+			Version: "v1alpha2",
+			Versions: []apiextensionsv1beta1.CustomResourceDefinitionVersion{
+				{Name: "v1", Served: true, Storage: true},
+				{Name: "v1alpha2", Served: true, Storage: false},
+			},
+			Scope: apiextensionsv1beta1.ClusterScoped,
+			Names: apiextensionsv1beta1.CustomResourceDefinitionNames{
+				Plural:   "tfjobs",
+				Kind:     "TFJob",
+				Singular: "tfjob",
+			},
+			Validation: &apiextensionsv1beta1.CustomResourceValidation{
+				OpenAPIV3Schema: &apiextensionsv1beta1.JSONSchemaProps{
+					Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+						"tfReplicaSpecs": {
+							Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+								"Worker": {
+									Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+										"replicas": {
+											Type:    "integer",
+											Minimum: float64Ptr(1),
+										},
+									},
+								},
+								"PS": {
+									Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+										"replicas": {
+											Type: "integer", Minimum: float64Ptr(1),
+										},
+									},
+								},
+								"Chief": {
+									Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+										"replicas": {
+											Type:    "integer",
+											Minimum: float64Ptr(1),
+											Maximum: float64Ptr(1),
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	// CRs of this namespaced scope CRD will be skipped.
+	crdNamespacedScope := &apiextensionsv1beta1.CustomResourceDefinition{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "tfjobs.kubeflow.org",
+			Namespace: "test",
+			Labels:    map[string]string{"juju-app": "app-name", "juju-model": "test"},
+		},
+		Spec: apiextensionsv1beta1.CustomResourceDefinitionSpec{
+			Group:   "kubeflow.org",
+			Version: "v1alpha2",
+			Versions: []apiextensionsv1beta1.CustomResourceDefinitionVersion{
+				{Name: "v1", Served: true, Storage: true},
+				{Name: "v1alpha2", Served: true, Storage: false},
+			},
+			Scope: apiextensionsv1beta1.NamespaceScoped,
+			Names: apiextensionsv1beta1.CustomResourceDefinitionNames{
+				Plural:   "tfjobs",
+				Kind:     "TFJob",
+				Singular: "tfjob",
+			},
+			Validation: &apiextensionsv1beta1.CustomResourceValidation{
+				OpenAPIV3Schema: &apiextensionsv1beta1.JSONSchemaProps{
+					Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+						"tfReplicaSpecs": {
+							Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+								"Worker": {
+									Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+										"replicas": {
+											Type:    "integer",
+											Minimum: float64Ptr(1),
+										},
+									},
+								},
+								"PS": {
+									Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+										"replicas": {
+											Type: "integer", Minimum: float64Ptr(1),
+										},
+									},
+								},
+								"Chief": {
+									Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+										"replicas": {
+											Type:    "integer",
+											Minimum: float64Ptr(1),
+											Maximum: float64Ptr(1),
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
 	ns := &core.Namespace{}
 	ns.Name = "test"
 	s.ensureJujuNamespaceAnnotations(isController, ns)
 	namespaceWatcher, namespaceFirer := newKubernetesTestWatcher()
 	s.k8sWatcherFn = newK8sWatcherFunc(namespaceWatcher)
 
-	gomock.InOrder(
-		s.mockNamespaces.EXPECT().Get("test", v1.GetOptions{}).
-			Return(ns, nil),
+	// timer +1.
+	s.mockClusterRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-model=test"}).
+		Return(&rbacv1.ClusterRoleBindingList{}, nil).
+		After(
+			s.mockClusterRoleBindings.EXPECT().DeleteCollection(
+				s.deleteOptions(v1.DeletePropagationForeground, ""),
+				v1.ListOptions{LabelSelector: "juju-model=test"},
+			).Return(s.k8sNotFoundError()),
+		)
 
-		s.mockNamespaces.EXPECT().Delete("test", s.deleteOptions(v1.DeletePropagationForeground, "")).
-			Return(nil),
+	// timer +1.
+	s.mockClusterRoles.EXPECT().List(v1.ListOptions{LabelSelector: "juju-model=test"}).
+		Return(&rbacv1.ClusterRoleList{}, nil).
+		After(
+			s.mockClusterRoles.EXPECT().DeleteCollection(
+				s.deleteOptions(v1.DeletePropagationForeground, ""),
+				v1.ListOptions{LabelSelector: "juju-model=test"},
+			).Return(s.k8sNotFoundError()),
+		)
 
-		s.mockStorageClass.EXPECT().DeleteCollection(
+	// timer +1.
+	s.mockNamespaceableResourceClient.EXPECT().List(
+		// list all custom resources for crd "v1alpha2".
+		v1.ListOptions{LabelSelector: "juju-model=test,juju-resource-lifecycle notin (persistent)"},
+	).Return(&unstructured.UnstructuredList{}, nil).After(
+		s.mockDynamicClient.EXPECT().Resource(
+			schema.GroupVersionResource{
+				Group:    crdClusterScope.Spec.Group,
+				Version:  "v1alpha2",
+				Resource: crdClusterScope.Spec.Names.Plural,
+			},
+		).Return(s.mockNamespaceableResourceClient),
+	).After(
+		// list all custom resources for crd "v1".
+		s.mockNamespaceableResourceClient.EXPECT().List(
+			v1.ListOptions{LabelSelector: "juju-model=test,juju-resource-lifecycle notin (persistent)"},
+		).Return(&unstructured.UnstructuredList{}, nil),
+	).After(
+		s.mockDynamicClient.EXPECT().Resource(
+			schema.GroupVersionResource{
+				Group:    crdClusterScope.Spec.Group,
+				Version:  "v1",
+				Resource: crdClusterScope.Spec.Names.Plural,
+			},
+		).Return(s.mockNamespaceableResourceClient),
+	).After(
+		// list cluster wide all custom resource definitions for listing custom resources.
+		s.mockCustomResourceDefinition.EXPECT().List(v1.ListOptions{}).AnyTimes().
+			Return(&apiextensionsv1beta1.CustomResourceDefinitionList{Items: []apiextensionsv1beta1.CustomResourceDefinition{*crdClusterScope, *crdNamespacedScope}}, nil),
+	).After(
+		// delete all custom resources for crd "v1alpha2".
+		s.mockNamespaceableResourceClient.EXPECT().DeleteCollection(
 			s.deleteOptions(v1.DeletePropagationForeground, ""),
-			v1.ListOptions{LabelSelector: "juju-model==test"},
-		).
-			Return(s.k8sNotFoundError()),
-
-		// still terminating.
-		s.mockNamespaces.EXPECT().Get("test", v1.GetOptions{}).
-			DoAndReturn(func(_, _ interface{}) (*core.Namespace, error) {
-				namespaceFirer()
-				return ns, nil
-			}),
-		// terminated, not found returned
-		s.mockNamespaces.EXPECT().Get("test", v1.GetOptions{}).
-			Return(nil, s.k8sNotFoundError()),
+			v1.ListOptions{LabelSelector: "juju-model=test,juju-resource-lifecycle notin (persistent)"},
+		).Return(nil),
+	).After(
+		s.mockDynamicClient.EXPECT().Resource(
+			schema.GroupVersionResource{
+				Group:    crdClusterScope.Spec.Group,
+				Version:  "v1alpha2",
+				Resource: crdClusterScope.Spec.Names.Plural,
+			},
+		).Return(s.mockNamespaceableResourceClient),
+	).After(
+		// delete all custom resources for crd "v1".
+		s.mockNamespaceableResourceClient.EXPECT().DeleteCollection(
+			s.deleteOptions(v1.DeletePropagationForeground, ""),
+			v1.ListOptions{LabelSelector: "juju-model=test,juju-resource-lifecycle notin (persistent)"},
+		).Return(nil),
+	).After(
+		s.mockDynamicClient.EXPECT().Resource(
+			schema.GroupVersionResource{
+				Group:    crdClusterScope.Spec.Group,
+				Version:  "v1",
+				Resource: crdClusterScope.Spec.Names.Plural,
+			},
+		).Return(s.mockNamespaceableResourceClient),
+	).After(
+		// list cluster wide all custom resource definitions for deleting custom resources.
+		s.mockCustomResourceDefinition.EXPECT().List(v1.ListOptions{}).AnyTimes().
+			Return(&apiextensionsv1beta1.CustomResourceDefinitionList{Items: []apiextensionsv1beta1.CustomResourceDefinition{*crdClusterScope, *crdNamespacedScope}}, nil),
 	)
 
-	c.Assert(destroyFunc(), jc.ErrorIsNil)
-	for _, watcher := range s.watchers {
-		c.Assert(workertest.CheckKilled(c, watcher), jc.ErrorIsNil)
+	// timer +1.
+	s.mockCustomResourceDefinition.EXPECT().List(v1.ListOptions{
+		LabelSelector: "juju-model=test,juju-resource-lifecycle notin (persistent)",
+	}).AnyTimes().
+		Return(&apiextensionsv1beta1.CustomResourceDefinitionList{}, nil).
+		After(
+			s.mockCustomResourceDefinition.EXPECT().DeleteCollection(
+				s.deleteOptions(v1.DeletePropagationForeground, ""),
+				v1.ListOptions{LabelSelector: "juju-model=test,juju-resource-lifecycle notin (persistent)"},
+			).Return(s.k8sNotFoundError()),
+		)
+
+	// timer +1.
+	s.mockMutatingWebhookConfiguration.EXPECT().List(v1.ListOptions{LabelSelector: "juju-model=test"}).
+		Return(&admissionregistrationv1beta1.MutatingWebhookConfigurationList{}, nil).
+		After(
+			s.mockMutatingWebhookConfiguration.EXPECT().DeleteCollection(
+				s.deleteOptions(v1.DeletePropagationForeground, ""),
+				v1.ListOptions{LabelSelector: "juju-model=test"},
+			).Return(s.k8sNotFoundError()),
+		)
+
+	// timer +1.
+	s.mockValidatingWebhookConfiguration.EXPECT().List(v1.ListOptions{LabelSelector: "juju-model=test"}).
+		Return(&admissionregistrationv1beta1.ValidatingWebhookConfigurationList{}, nil).
+		After(
+			s.mockValidatingWebhookConfiguration.EXPECT().DeleteCollection(
+				s.deleteOptions(v1.DeletePropagationForeground, ""),
+				v1.ListOptions{LabelSelector: "juju-model=test"},
+			).Return(s.k8sNotFoundError()),
+		)
+
+	// timer +1.
+	s.mockStorageClass.EXPECT().List(v1.ListOptions{LabelSelector: "juju-model=test"}).
+		Return(&storagev1.StorageClassList{}, nil).
+		After(
+			s.mockStorageClass.EXPECT().DeleteCollection(
+				s.deleteOptions(v1.DeletePropagationForeground, ""),
+				v1.ListOptions{LabelSelector: "juju-model=test"},
+			).Return(nil),
+		)
+
+	s.mockNamespaces.EXPECT().Get("test", v1.GetOptions{}).
+		Return(ns, nil)
+	s.mockNamespaces.EXPECT().Delete("test", s.deleteOptions(v1.DeletePropagationForeground, "")).
+		Return(nil)
+	// still terminating.
+	s.mockNamespaces.EXPECT().Get("test", v1.GetOptions{}).
+		DoAndReturn(func(_, _ interface{}) (*core.Namespace, error) {
+			namespaceFirer()
+			return ns, nil
+		})
+	// terminated, not found returned.
+	s.mockNamespaces.EXPECT().Get("test", v1.GetOptions{}).
+		Return(nil, s.k8sNotFoundError())
+
+	errCh := make(chan error)
+	go func() {
+		errCh <- destroyFunc()
+	}()
+
+	err := s.clock.WaitAdvance(time.Second, testing.ShortWait, 6)
+	c.Assert(err, jc.ErrorIsNil)
+	err = s.clock.WaitAdvance(time.Second, testing.ShortWait, 1)
+	c.Assert(err, jc.ErrorIsNil)
+
+	select {
+	case err := <-errCh:
+		c.Assert(err, jc.ErrorIsNil)
+		for _, watcher := range s.watchers {
+			c.Assert(workertest.CheckKilled(c, watcher), jc.ErrorIsNil)
+		}
+	case <-time.After(testing.LongWait):
+		c.Fatalf("timed out waiting for destroyFunc return")
 	}
 }
 
@@ -1382,7 +1636,12 @@ func (s *K8sBrokerSuite) TestCreate(c *gc.C) {
 	ctrl := s.setupController(c)
 	defer ctrl.Finish()
 
-	ns := s.ensureJujuNamespaceAnnotations(false, &core.Namespace{ObjectMeta: v1.ObjectMeta{Name: "test"}})
+	ns := s.ensureJujuNamespaceAnnotations(false, &core.Namespace{
+		ObjectMeta: v1.ObjectMeta{
+			Labels: provider.LabelsForModel("test"),
+			Name:   "test",
+		},
+	})
 	gomock.InOrder(
 		s.mockNamespaces.EXPECT().Create(ns).
 			Return(ns, nil),
@@ -1399,7 +1658,12 @@ func (s *K8sBrokerSuite) TestCreateAlreadyExists(c *gc.C) {
 	ctrl := s.setupController(c)
 	defer ctrl.Finish()
 
-	ns := s.ensureJujuNamespaceAnnotations(false, &core.Namespace{ObjectMeta: v1.ObjectMeta{Name: "test"}})
+	ns := s.ensureJujuNamespaceAnnotations(false, &core.Namespace{
+		ObjectMeta: v1.ObjectMeta{
+			Labels: provider.LabelsForModel("test"),
+			Name:   "test",
+		},
+	})
 	gomock.InOrder(
 		s.mockNamespaces.EXPECT().Create(ns).
 			Return(nil, s.k8sAlreadyExistsError()),
@@ -1427,6 +1691,7 @@ func unitStatefulSetArg(numUnits int32, scName string, podSpec core.PodSpec) *ap
 			Selector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"juju-app": "app-name"},
 			},
+			RevisionHistoryLimit: int32Ptr(0),
 			Template: core.PodTemplateSpec{
 				ObjectMeta: v1.ObjectMeta{
 					Labels: map[string]string{"juju-app": "app-name"},
@@ -1538,35 +1803,35 @@ func (s *K8sBrokerSuite) TestDeleteServiceForApplication(c *gc.C) {
 		// delete secrets.
 		s.mockSecrets.EXPECT().DeleteCollection(
 			s.deleteOptions(v1.DeletePropagationForeground, ""),
-			v1.ListOptions{LabelSelector: "juju-app==test"},
+			v1.ListOptions{LabelSelector: "juju-app=test"},
 		).Return(nil),
 
 		// delete configmaps.
 		s.mockConfigMaps.EXPECT().DeleteCollection(
 			s.deleteOptions(v1.DeletePropagationForeground, ""),
-			v1.ListOptions{LabelSelector: "juju-app==test"},
+			v1.ListOptions{LabelSelector: "juju-app=test"},
 		).Return(nil),
 
 		// delete RBAC resources.
 		s.mockRoleBindings.EXPECT().DeleteCollection(
 			s.deleteOptions(v1.DeletePropagationForeground, ""),
-			v1.ListOptions{LabelSelector: "juju-app==test"},
+			v1.ListOptions{LabelSelector: "juju-app=test"},
 		).Return(nil),
 		s.mockClusterRoleBindings.EXPECT().DeleteCollection(
 			s.deleteOptions(v1.DeletePropagationForeground, ""),
-			v1.ListOptions{LabelSelector: "juju-app==test,juju-model==test"},
+			v1.ListOptions{LabelSelector: "juju-app=test,juju-model=test"},
 		).Return(nil),
 		s.mockRoles.EXPECT().DeleteCollection(
 			s.deleteOptions(v1.DeletePropagationForeground, ""),
-			v1.ListOptions{LabelSelector: "juju-app==test"},
+			v1.ListOptions{LabelSelector: "juju-app=test"},
 		).Return(nil),
 		s.mockClusterRoles.EXPECT().DeleteCollection(
 			s.deleteOptions(v1.DeletePropagationForeground, ""),
-			v1.ListOptions{LabelSelector: "juju-app==test,juju-model==test"},
+			v1.ListOptions{LabelSelector: "juju-app=test,juju-model=test"},
 		).Return(nil),
 		s.mockServiceAccounts.EXPECT().DeleteCollection(
 			s.deleteOptions(v1.DeletePropagationForeground, ""),
-			v1.ListOptions{LabelSelector: "juju-app==test"},
+			v1.ListOptions{LabelSelector: "juju-app=test"},
 		).Return(nil),
 
 		// list cluster wide all custom resource definitions for deleting custom resources.
@@ -1582,7 +1847,7 @@ func (s *K8sBrokerSuite) TestDeleteServiceForApplication(c *gc.C) {
 		).Return(s.mockNamespaceableResourceClient),
 		s.mockResourceClient.EXPECT().DeleteCollection(
 			s.deleteOptions(v1.DeletePropagationForeground, ""),
-			v1.ListOptions{LabelSelector: "juju-app==test"},
+			v1.ListOptions{LabelSelector: "juju-app=test,juju-resource-lifecycle notin (model,persistent)"},
 		).Return(nil),
 		// delete all custom resources for crd "v1alpha2".
 		s.mockDynamicClient.EXPECT().Resource(
@@ -1594,37 +1859,37 @@ func (s *K8sBrokerSuite) TestDeleteServiceForApplication(c *gc.C) {
 		).Return(s.mockNamespaceableResourceClient),
 		s.mockResourceClient.EXPECT().DeleteCollection(
 			s.deleteOptions(v1.DeletePropagationForeground, ""),
-			v1.ListOptions{LabelSelector: "juju-app==test"},
+			v1.ListOptions{LabelSelector: "juju-app=test,juju-resource-lifecycle notin (model,persistent)"},
 		).Return(nil),
 
 		// delete all custom resource definitions.
 		s.mockCustomResourceDefinition.EXPECT().DeleteCollection(
 			s.deleteOptions(v1.DeletePropagationForeground, ""),
-			v1.ListOptions{LabelSelector: "juju-app==test,juju-model==test"},
+			v1.ListOptions{LabelSelector: "juju-app=test,juju-model=test,juju-resource-lifecycle notin (model,persistent)"},
 		).Return(nil),
 
 		// delete all mutating webhook configurations.
 		s.mockMutatingWebhookConfiguration.EXPECT().DeleteCollection(
 			s.deleteOptions(v1.DeletePropagationForeground, ""),
-			v1.ListOptions{LabelSelector: "juju-app==test,juju-model==test"},
+			v1.ListOptions{LabelSelector: "juju-app=test,juju-model=test"},
 		).Return(nil),
 
 		// delete all validating webhook configurations.
 		s.mockValidatingWebhookConfiguration.EXPECT().DeleteCollection(
 			s.deleteOptions(v1.DeletePropagationForeground, ""),
-			v1.ListOptions{LabelSelector: "juju-app==test,juju-model==test"},
+			v1.ListOptions{LabelSelector: "juju-app=test,juju-model=test"},
 		).Return(nil),
 
 		// delete all ingress resources.
 		s.mockIngressInterface.EXPECT().DeleteCollection(
 			s.deleteOptions(v1.DeletePropagationForeground, ""),
-			v1.ListOptions{LabelSelector: "juju-app==test"},
+			v1.ListOptions{LabelSelector: "juju-app=test"},
 		).Return(nil),
 
 		// delete all daemon set resources.
 		s.mockDaemonSets.EXPECT().DeleteCollection(
 			s.deleteOptions(v1.DeletePropagationForeground, ""),
-			v1.ListOptions{LabelSelector: "juju-app==test"},
+			v1.ListOptions{LabelSelector: "juju-app=test"},
 		).Return(nil),
 	)
 
@@ -1653,7 +1918,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceNoUnits(c *gc.C) {
 	)
 
 	params := &caas.ServiceParams{}
-	err := s.broker.EnsureService("app-name", nil, params, 0, nil)
+	err := s.broker.EnsureService("app-name", func(_ string, _ status.Status, _ string, _ map[string]interface{}) error { return nil }, params, 0, nil)
 	c.Assert(err, jc.ErrorIsNil)
 }
 
@@ -1680,6 +1945,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceNoStorage(c *gc.C) {
 			Selector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"juju-app": "app-name"},
 			},
+			RevisionHistoryLimit: int32Ptr(0),
 			Template: core.PodTemplateSpec{
 				ObjectMeta: v1.ObjectMeta{
 					GenerateName: "app-name-",
@@ -1746,13 +2012,108 @@ func (s *K8sBrokerSuite) TestEnsureServiceNoStorage(c *gc.C) {
 			"fred":                 "mary",
 		},
 	}
-	err = s.broker.EnsureService("app-name", nil, params, 2, application.ConfigAttributes{
+	err = s.broker.EnsureService("app-name", func(_ string, _ status.Status, _ string, _ map[string]interface{}) error { return nil }, params, 2, application.ConfigAttributes{
 		"kubernetes-service-type":            "nodeIP",
 		"kubernetes-service-loadbalancer-ip": "10.0.0.1",
 		"kubernetes-service-externalname":    "ext-name",
 		"kubernetes-service-annotations":     map[string]interface{}{"a": "b"},
 	})
 	c.Assert(err, jc.ErrorIsNil)
+}
+
+func (s *K8sBrokerSuite) TestEnsureServiceStatelessWithScalePolicyInvalid(c *gc.C) {
+	ctrl := s.setupController(c)
+	defer ctrl.Finish()
+
+	basicPodSpec := getBasicPodspec()
+	basicPodSpec.Service = &specs.ServiceSpec{
+		// ScalePolicy is only for statefulset.
+		ScalePolicy: specs.SerialScale,
+	}
+
+	ociImageSecret := s.getOCIImageSecret(c, map[string]string{"fred": "mary"})
+	gomock.InOrder(
+		s.mockStatefulSets.EXPECT().Get("juju-operator-app-name", v1.GetOptions{}).
+			Return(nil, s.k8sNotFoundError()),
+		s.mockSecrets.EXPECT().Create(ociImageSecret).
+			Return(ociImageSecret, nil),
+		s.mockStatefulSets.EXPECT().Get("app-name", v1.GetOptions{}).
+			Return(nil, s.k8sNotFoundError()),
+		s.mockSecrets.EXPECT().Delete(ociImageSecret.GetName(), s.deleteOptions(v1.DeletePropagationForeground, "")).
+			Return(nil),
+	)
+
+	params := &caas.ServiceParams{
+		PodSpec:           basicPodSpec,
+		OperatorImagePath: "operator/image-path",
+		ResourceTags: map[string]string{
+			"juju-controller-uuid": testing.ControllerTag.Id(),
+			"fred":                 "mary",
+		},
+	}
+	err := s.broker.EnsureService("app-name", func(_ string, _ status.Status, _ string, _ map[string]interface{}) error { return nil }, params, 2, application.ConfigAttributes{
+		"kubernetes-service-type":            "nodeIP",
+		"kubernetes-service-loadbalancer-ip": "10.0.0.1",
+		"kubernetes-service-externalname":    "ext-name",
+		"kubernetes-service-annotations":     map[string]interface{}{"a": "b"},
+	})
+	c.Assert(err, gc.ErrorMatches, `ScalePolicy is only supported for stateful applications`)
+}
+
+func (s *K8sBrokerSuite) TestEnsureServiceForDaemonSetWithStorageInvalid(c *gc.C) {
+	ctrl := s.setupController(c)
+	defer ctrl.Finish()
+
+	basicPodSpec := getBasicPodspec()
+
+	ociImageSecret := s.getOCIImageSecret(c, map[string]string{"fred": "mary"})
+	gomock.InOrder(
+		s.mockStatefulSets.EXPECT().Get("juju-operator-app-name", v1.GetOptions{}).
+			Return(nil, s.k8sNotFoundError()),
+		s.mockSecrets.EXPECT().Create(ociImageSecret).
+			Return(ociImageSecret, nil),
+		s.mockStatefulSets.EXPECT().Get("app-name", v1.GetOptions{}).
+			Return(nil, s.k8sNotFoundError()),
+		s.mockSecrets.EXPECT().Delete(ociImageSecret.GetName(), s.deleteOptions(v1.DeletePropagationForeground, "")).
+			Return(nil),
+	)
+
+	params := &caas.ServiceParams{
+		PodSpec: basicPodSpec,
+		Deployment: caas.DeploymentParams{
+			DeploymentType: caas.DeploymentDaemon,
+		},
+		Filesystems: []storage.KubernetesFilesystemParams{{
+			StorageName: "database",
+			Size:        100,
+			Provider:    "kubernetes",
+			Attributes:  map[string]interface{}{"storage-class": "workload-storage"},
+			Attachment: &storage.KubernetesFilesystemAttachmentParams{
+				Path: "path/to/here",
+			},
+			ResourceTags: map[string]string{"foo": "bar"},
+		}, {
+			StorageName: "logs",
+			Size:        200,
+			Provider:    "tmpfs",
+			Attributes:  map[string]interface{}{"storage-medium": "Memory"},
+			Attachment: &storage.KubernetesFilesystemAttachmentParams{
+				Path: "path/to/there",
+			},
+		}},
+		OperatorImagePath: "operator/image-path",
+		ResourceTags: map[string]string{
+			"juju-controller-uuid": testing.ControllerTag.Id(),
+			"fred":                 "mary",
+		},
+	}
+	err := s.broker.EnsureService("app-name", func(_ string, _ status.Status, _ string, _ map[string]interface{}) error { return nil }, params, 2, application.ConfigAttributes{
+		"kubernetes-service-type":            "nodeIP",
+		"kubernetes-service-loadbalancer-ip": "10.0.0.1",
+		"kubernetes-service-externalname":    "ext-name",
+		"kubernetes-service-annotations":     map[string]interface{}{"a": "b"},
+	})
+	c.Assert(err, gc.ErrorMatches, `charm defined storage is only supported for deployment type "stateful", please instead define storage using volumeConfig in containers`)
 }
 
 func (s *K8sBrokerSuite) TestEnsureServiceWithConfigMapAndSecretsCreate(c *gc.C) {
@@ -1809,6 +2170,7 @@ password: shhhh`[1:],
 			Selector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"juju-app": "app-name"},
 			},
+			RevisionHistoryLimit: int32Ptr(0),
 			Template: core.PodTemplateSpec{
 				ObjectMeta: v1.ObjectMeta{
 					GenerateName: "app-name-",
@@ -1941,7 +2303,7 @@ password: shhhh`[1:],
 			"fred":                 "mary",
 		},
 	}
-	err = s.broker.EnsureService("app-name", nil, params, 2, application.ConfigAttributes{
+	err = s.broker.EnsureService("app-name", func(_ string, _ status.Status, _ string, _ map[string]interface{}) error { return nil }, params, 2, application.ConfigAttributes{
 		"kubernetes-service-type":            "nodeIP",
 		"kubernetes-service-loadbalancer-ip": "10.0.0.1",
 		"kubernetes-service-externalname":    "ext-name",
@@ -1963,6 +2325,283 @@ func (s *K8sBrokerSuite) TestVersion(c *gc.C) {
 	ver, err := s.broker.Version()
 	c.Assert(err, jc.ErrorIsNil)
 	c.Assert(ver, gc.DeepEquals, &version.Number{Major: 1, Minor: 15})
+}
+
+func (s *K8sBrokerSuite) TestGetServiceSvcNotFound(c *gc.C) {
+	ctrl := s.setupController(c)
+	defer ctrl.Finish()
+
+	gomock.InOrder(
+		s.mockServices.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name"}).
+			Return(&core.ServiceList{Items: []core.Service{}}, nil),
+
+		s.mockStatefulSets.EXPECT().Get("juju-operator-app-name", v1.GetOptions{}).
+			Return(nil, s.k8sNotFoundError()),
+
+		s.mockStatefulSets.EXPECT().Get("app-name", v1.GetOptions{}).
+			Return(nil, s.k8sNotFoundError()),
+		s.mockDeployments.EXPECT().Get("app-name", v1.GetOptions{}).
+			Return(nil, s.k8sNotFoundError()),
+		s.mockDaemonSets.EXPECT().Get("app-name", v1.GetOptions{}).
+			Return(nil, s.k8sNotFoundError()),
+	)
+
+	caasSvc, err := s.broker.GetService("app-name", false)
+	c.Assert(err, jc.ErrorIsNil)
+	c.Assert(caasSvc, gc.DeepEquals, &caas.Service{})
+}
+
+func (s *K8sBrokerSuite) assertGetService(c *gc.C, expectedSvcResult *caas.Service, assertCalls ...*gomock.Call) {
+	svc := core.Service{
+		ObjectMeta: v1.ObjectMeta{
+			Name:   "app-name",
+			Labels: map[string]string{"juju-app": "app-name"},
+			Annotations: map[string]string{
+				"juju.io/controller": testing.ControllerTag.Id(),
+				"fred":               "mary",
+				"a":                  "b",
+			}},
+		Spec: core.ServiceSpec{
+			Selector: map[string]string{"juju-app": "app-name"},
+			Type:     core.ServiceTypeLoadBalancer,
+			Ports: []core.ServicePort{
+				{Port: 80, TargetPort: intstr.FromInt(80), Protocol: "TCP"},
+				{Port: 8080, Protocol: "TCP", Name: "fred"},
+			},
+			LoadBalancerIP: "10.0.0.1",
+			ExternalName:   "ext-name",
+		},
+	}
+	svc.SetUID("uid-xxxxx")
+
+	gomock.InOrder(
+		append([]*gomock.Call{
+			s.mockServices.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name"}).
+				Return(&core.ServiceList{Items: []core.Service{svc}}, nil),
+
+			s.mockStatefulSets.EXPECT().Get("juju-operator-app-name", v1.GetOptions{}).
+				Return(nil, s.k8sNotFoundError()),
+		}, assertCalls...)...,
+	)
+
+	caasSvc, err := s.broker.GetService("app-name", false)
+	c.Assert(err, jc.ErrorIsNil)
+	c.Assert(caasSvc, gc.DeepEquals, expectedSvcResult)
+}
+
+func (s *K8sBrokerSuite) TestGetServiceSvcFoundNoWorkload(c *gc.C) {
+	ctrl := s.setupController(c)
+	defer ctrl.Finish()
+	s.assertGetService(c,
+		&caas.Service{
+			Id: "uid-xxxxx",
+			Addresses: network.ProviderAddresses{
+				network.NewScopedProviderAddress("10.0.0.1", network.ScopePublic),
+			},
+		},
+		s.mockStatefulSets.EXPECT().Get("app-name", v1.GetOptions{}).
+			Return(nil, s.k8sNotFoundError()),
+		s.mockDeployments.EXPECT().Get("app-name", v1.GetOptions{}).
+			Return(nil, s.k8sNotFoundError()),
+		s.mockDaemonSets.EXPECT().Get("app-name", v1.GetOptions{}).
+			Return(nil, s.k8sNotFoundError()),
+	)
+}
+
+func (s *K8sBrokerSuite) TestGetServiceSvcFoundWithStatefulSet(c *gc.C) {
+	ctrl := s.setupController(c)
+	defer ctrl.Finish()
+
+	basicPodSpec := getBasicPodspec()
+	basicPodSpec.Service = &specs.ServiceSpec{
+		ScalePolicy: "serial",
+	}
+	workloadSpec, err := provider.PrepareWorkloadSpec("app-name", "app-name", basicPodSpec, "operator/image-path")
+	c.Assert(err, jc.ErrorIsNil)
+	podSpec := provider.PodSpec(workloadSpec)
+
+	numUnits := int32(2)
+	workload := &appsv1.StatefulSet{
+		ObjectMeta: v1.ObjectMeta{
+			Name:   "app-name",
+			Labels: map[string]string{"juju-app": "app-name"},
+			Annotations: map[string]string{
+				"juju-app-uuid":      "appuuid",
+				"juju.io/controller": testing.ControllerTag.Id(),
+			},
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas: &numUnits,
+			Selector: &v1.LabelSelector{
+				MatchLabels: map[string]string{"juju-app": "app-name"},
+			},
+			Template: core.PodTemplateSpec{
+				ObjectMeta: v1.ObjectMeta{
+					Labels: map[string]string{"juju-app": "app-name"},
+					Annotations: map[string]string{
+						"apparmor.security.beta.kubernetes.io/pod": "runtime/default",
+						"seccomp.security.beta.kubernetes.io/pod":  "docker/default",
+						"juju.io/controller":                       testing.ControllerTag.Id(),
+					},
+				},
+				Spec: podSpec,
+			},
+			PodManagementPolicy: apps.PodManagementPolicyType("OrderedReady"),
+			ServiceName:         "app-name-endpoints",
+		},
+	}
+	workload.SetGeneration(1)
+
+	s.assertGetService(c,
+		&caas.Service{
+			Id: "uid-xxxxx",
+			Addresses: network.ProviderAddresses{
+				network.NewScopedProviderAddress("10.0.0.1", network.ScopePublic),
+			},
+			Scale:      intPtr(2),
+			Generation: int64Ptr(1),
+			Status: status.StatusInfo{
+				Status: status.Active,
+			},
+		},
+		s.mockStatefulSets.EXPECT().Get("app-name", v1.GetOptions{}).
+			Return(workload, nil),
+		s.mockEvents.EXPECT().List(
+			listOptionsFieldSelectorMatcher("involvedObject.name=app-name,involvedObject.kind=StatefulSet"),
+		).Return(&core.EventList{}, nil),
+	)
+}
+
+func (s *K8sBrokerSuite) TestGetServiceSvcFoundWithDeployment(c *gc.C) {
+	ctrl := s.setupController(c)
+	defer ctrl.Finish()
+
+	basicPodSpec := getBasicPodspec()
+	basicPodSpec.Service = &specs.ServiceSpec{
+		ScalePolicy: "serial",
+	}
+	workloadSpec, err := provider.PrepareWorkloadSpec("app-name", "app-name", basicPodSpec, "operator/image-path")
+	c.Assert(err, jc.ErrorIsNil)
+	podSpec := provider.PodSpec(workloadSpec)
+
+	numUnits := int32(2)
+	workload := &appsv1.Deployment{
+		ObjectMeta: v1.ObjectMeta{
+			Name:   "app-name",
+			Labels: map[string]string{"juju-app": "app-name"},
+			Annotations: map[string]string{
+				"juju.io/controller": testing.ControllerTag.Id(),
+				"fred":               "mary",
+			}},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &numUnits,
+			Selector: &v1.LabelSelector{
+				MatchLabels: map[string]string{"juju-app": "app-name"},
+			},
+			Template: core.PodTemplateSpec{
+				ObjectMeta: v1.ObjectMeta{
+					GenerateName: "app-name-",
+					Labels: map[string]string{
+						"juju-app": "app-name",
+					},
+					Annotations: map[string]string{
+						"apparmor.security.beta.kubernetes.io/pod": "runtime/default",
+						"seccomp.security.beta.kubernetes.io/pod":  "docker/default",
+						"fred":               "mary",
+						"juju.io/controller": testing.ControllerTag.Id(),
+					},
+				},
+				Spec: podSpec,
+			},
+		},
+	}
+	workload.SetGeneration(1)
+
+	s.assertGetService(c,
+		&caas.Service{
+			Id: "uid-xxxxx",
+			Addresses: network.ProviderAddresses{
+				network.NewScopedProviderAddress("10.0.0.1", network.ScopePublic),
+			},
+			Scale:      intPtr(2),
+			Generation: int64Ptr(1),
+			Status: status.StatusInfo{
+				Status: status.Active,
+			},
+		},
+		s.mockStatefulSets.EXPECT().Get("app-name", v1.GetOptions{}).
+			Return(nil, s.k8sNotFoundError()),
+		s.mockDeployments.EXPECT().Get("app-name", v1.GetOptions{}).
+			Return(workload, nil),
+		s.mockEvents.EXPECT().List(
+			listOptionsFieldSelectorMatcher("involvedObject.name=app-name,involvedObject.kind=Deployment"),
+		).Return(&core.EventList{}, nil),
+	)
+}
+
+func (s *K8sBrokerSuite) TestGetServiceSvcFoundWithDaemonSet(c *gc.C) {
+	ctrl := s.setupController(c)
+	defer ctrl.Finish()
+
+	basicPodSpec := getBasicPodspec()
+	basicPodSpec.Service = &specs.ServiceSpec{
+		ScalePolicy: "serial",
+	}
+	workloadSpec, err := provider.PrepareWorkloadSpec("app-name", "app-name", basicPodSpec, "operator/image-path")
+	c.Assert(err, jc.ErrorIsNil)
+	podSpec := provider.PodSpec(workloadSpec)
+
+	workload := &appsv1.DaemonSet{
+		ObjectMeta: v1.ObjectMeta{
+			Name:        "app-name",
+			Labels:      map[string]string{"juju-app": "app-name"},
+			Annotations: map[string]string{"juju.io/controller": testing.ControllerTag.Id()}},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &v1.LabelSelector{
+				MatchLabels: map[string]string{"juju-app": "app-name"},
+			},
+			Template: core.PodTemplateSpec{
+				ObjectMeta: v1.ObjectMeta{
+					GenerateName: "app-name-",
+					Labels:       map[string]string{"juju-app": "app-name"},
+					Annotations: map[string]string{
+						"apparmor.security.beta.kubernetes.io/pod": "runtime/default",
+						"seccomp.security.beta.kubernetes.io/pod":  "docker/default",
+						"juju.io/controller":                       testing.ControllerTag.Id(),
+					},
+				},
+				Spec: podSpec,
+			},
+		},
+		Status: appsv1.DaemonSetStatus{
+			DesiredNumberScheduled: 2,
+			NumberReady:            2,
+		},
+	}
+	workload.SetGeneration(1)
+
+	s.assertGetService(c,
+		&caas.Service{
+			Id: "uid-xxxxx",
+			Addresses: network.ProviderAddresses{
+				network.NewScopedProviderAddress("10.0.0.1", network.ScopePublic),
+			},
+			Scale:      intPtr(2),
+			Generation: int64Ptr(1),
+			Status: status.StatusInfo{
+				Status: status.Active,
+			},
+		},
+		s.mockStatefulSets.EXPECT().Get("app-name", v1.GetOptions{}).
+			Return(nil, s.k8sNotFoundError()),
+		s.mockDeployments.EXPECT().Get("app-name", v1.GetOptions{}).
+			Return(nil, s.k8sNotFoundError()),
+		s.mockDaemonSets.EXPECT().Get("app-name", v1.GetOptions{}).
+			Return(workload, nil),
+		s.mockEvents.EXPECT().List(
+			listOptionsFieldSelectorMatcher("involvedObject.name=app-name,involvedObject.kind=DaemonSet"),
+		).Return(&core.EventList{}, nil),
+	)
 }
 
 func (s *K8sBrokerSuite) TestEnsureServiceWithConfigMapAndSecretsUpdate(c *gc.C) {
@@ -2019,6 +2658,7 @@ password: shhhh`[1:],
 			Selector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"juju-app": "app-name"},
 			},
+			RevisionHistoryLimit: int32Ptr(0),
 			Template: core.PodTemplateSpec{
 				ObjectMeta: v1.ObjectMeta{
 					GenerateName: "app-name-",
@@ -2120,7 +2760,7 @@ password: shhhh`[1:],
 		// ensure configmaps.
 		s.mockConfigMaps.EXPECT().Create(cm).
 			Return(nil, s.k8sAlreadyExistsError()),
-		s.mockConfigMaps.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==app-name"}).
+		s.mockConfigMaps.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name"}).
 			Return(&core.ConfigMapList{Items: []core.ConfigMap{*cm}}, nil),
 		s.mockConfigMaps.EXPECT().Update(cm).
 			Return(cm, nil),
@@ -2128,13 +2768,13 @@ password: shhhh`[1:],
 		// ensure secrets.
 		s.mockSecrets.EXPECT().Create(secrets1).
 			Return(nil, s.k8sAlreadyExistsError()),
-		s.mockSecrets.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==app-name"}).
+		s.mockSecrets.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name"}).
 			Return(&core.SecretList{Items: []core.Secret{*secrets1}}, nil),
 		s.mockSecrets.EXPECT().Update(secrets1).
 			Return(secrets1, nil),
 		s.mockSecrets.EXPECT().Create(secrets2).
 			Return(nil, s.k8sAlreadyExistsError()),
-		s.mockSecrets.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==app-name"}).
+		s.mockSecrets.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name"}).
 			Return(&core.SecretList{Items: []core.Secret{*secrets2}}, nil),
 		s.mockSecrets.EXPECT().Update(secrets2).
 			Return(secrets2, nil),
@@ -2163,7 +2803,7 @@ password: shhhh`[1:],
 		},
 		OperatorImagePath: "operator/image-path",
 	}
-	err = s.broker.EnsureService("app-name", nil, params, 2, application.ConfigAttributes{
+	err = s.broker.EnsureService("app-name", func(_ string, _ status.Status, _ string, _ map[string]interface{}) error { return nil }, params, 2, application.ConfigAttributes{
 		"kubernetes-service-type":            "nodeIP",
 		"kubernetes-service-loadbalancer-ip": "10.0.0.1",
 		"kubernetes-service-externalname":    "ext-name",
@@ -2199,6 +2839,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceNoStorageStateful(c *gc.C) {
 			Selector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"juju-app": "app-name"},
 			},
+			RevisionHistoryLimit: int32Ptr(0),
 			Template: core.PodTemplateSpec{
 				ObjectMeta: v1.ObjectMeta{
 					Labels: map[string]string{"juju-app": "app-name"},
@@ -2253,7 +2894,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceNoStorageStateful(c *gc.C) {
 		OperatorImagePath: "operator/image-path",
 		ResourceTags:      map[string]string{"juju-controller-uuid": testing.ControllerTag.Id()},
 	}
-	err = s.broker.EnsureService("app-name", nil, params, 2, application.ConfigAttributes{
+	err = s.broker.EnsureService("app-name", func(_ string, _ status.Status, _ string, _ map[string]interface{}) error { return nil }, params, 2, application.ConfigAttributes{
 		"kubernetes-service-loadbalancer-ip": "10.0.0.1",
 		"kubernetes-service-externalname":    "ext-name",
 	})
@@ -2284,6 +2925,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceCustomType(c *gc.C) {
 			Selector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"juju-app": "app-name"},
 			},
+			RevisionHistoryLimit: int32Ptr(0),
 			Template: core.PodTemplateSpec{
 				ObjectMeta: v1.ObjectMeta{
 					Labels: map[string]string{"juju-app": "app-name"},
@@ -2340,7 +2982,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceCustomType(c *gc.C) {
 		OperatorImagePath: "operator/image-path",
 		ResourceTags:      map[string]string{"juju-controller-uuid": testing.ControllerTag.Id()},
 	}
-	err = s.broker.EnsureService("app-name", nil, params, 2, application.ConfigAttributes{
+	err = s.broker.EnsureService("app-name", func(_ string, _ status.Status, _ string, _ map[string]interface{}) error { return nil }, params, 2, application.ConfigAttributes{
 		"kubernetes-service-loadbalancer-ip": "10.0.0.1",
 		"kubernetes-service-externalname":    "ext-name",
 	})
@@ -2397,15 +3039,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountNewRoleCreate(c *gc.
 	defer ctrl.Finish()
 
 	podSpec := getBasicPodspec()
-	podSpec.ServiceAccount = &specs.ServiceAccountSpec{}
-	podSpec.ServiceAccount.AutomountServiceAccountToken = boolPtr(true)
-	podSpec.ServiceAccount.Rules = []specs.PolicyRule{
-		{
-			APIGroups: []string{""},
-			Resources: []string{"pods"},
-			Verbs:     []string{"get", "watch", "list"},
-		},
-	}
+	podSpec.ServiceAccount = primeServiceAccount
 
 	numUnits := int32(2)
 	workloadSpec, err := provider.PrepareWorkloadSpec("app-name", "app-name", podSpec, "operator/image-path")
@@ -2424,6 +3058,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountNewRoleCreate(c *gc.
 			Selector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"juju-app": "app-name"},
 			},
+			RevisionHistoryLimit: int32Ptr(0),
 			Template: core.PodTemplateSpec{
 				ObjectMeta: v1.ObjectMeta{
 					GenerateName: "app-name-",
@@ -2521,7 +3156,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountNewRoleCreate(c *gc.
 			Return(nil, s.k8sNotFoundError()),
 		s.mockServiceAccounts.EXPECT().Create(svcAccount).Return(svcAccount, nil),
 		s.mockRoles.EXPECT().Create(role).Return(role, nil),
-		s.mockRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==app-name"}).
+		s.mockRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name"}).
 			Return(&rbacv1.RoleBindingList{Items: []rbacv1.RoleBinding{}}, nil),
 		s.mockRoleBindings.EXPECT().Create(rb).Return(rb, nil),
 		s.mockSecrets.EXPECT().Create(secretArg).Return(secretArg, nil),
@@ -2561,15 +3196,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountNewRoleUpdate(c *gc.
 	defer ctrl.Finish()
 
 	podSpec := getBasicPodspec()
-	podSpec.ServiceAccount = &specs.ServiceAccountSpec{}
-	podSpec.ServiceAccount.AutomountServiceAccountToken = boolPtr(true)
-	podSpec.ServiceAccount.Rules = []specs.PolicyRule{
-		{
-			APIGroups: []string{""},
-			Resources: []string{"pods"},
-			Verbs:     []string{"get", "watch", "list"},
-		},
-	}
+	podSpec.ServiceAccount = primeServiceAccount
 
 	numUnits := int32(2)
 	workloadSpec, err := provider.PrepareWorkloadSpec("app-name", "app-name", podSpec, "operator/image-path")
@@ -2588,6 +3215,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountNewRoleUpdate(c *gc.
 			Selector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"juju-app": "app-name"},
 			},
+			RevisionHistoryLimit: int32Ptr(0),
 			Template: core.PodTemplateSpec{
 				ObjectMeta: v1.ObjectMeta{
 					GenerateName: "app-name-",
@@ -2685,14 +3313,14 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountNewRoleUpdate(c *gc.
 		s.mockStatefulSets.EXPECT().Get("juju-operator-app-name", v1.GetOptions{}).
 			Return(nil, s.k8sNotFoundError()),
 		s.mockServiceAccounts.EXPECT().Create(svcAccount).Return(nil, s.k8sAlreadyExistsError()),
-		s.mockServiceAccounts.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==app-name"}).
+		s.mockServiceAccounts.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name"}).
 			Return(&core.ServiceAccountList{Items: []core.ServiceAccount{*svcAccount}}, nil),
 		s.mockServiceAccounts.EXPECT().Update(svcAccount).Return(svcAccount, nil),
 		s.mockRoles.EXPECT().Create(role).Return(nil, s.k8sAlreadyExistsError()),
-		s.mockRoles.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==app-name"}).
+		s.mockRoles.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name"}).
 			Return(&rbacv1.RoleList{Items: []rbacv1.Role{*role}}, nil),
 		s.mockRoles.EXPECT().Update(role).Return(role, nil),
-		s.mockRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==app-name"}).
+		s.mockRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name"}).
 			Return(&rbacv1.RoleBindingList{Items: []rbacv1.RoleBinding{*rb}}, nil),
 		s.mockRoleBindings.EXPECT().Delete("app-name", s.deleteOptions(v1.DeletePropagationForeground, rbUID)).Return(nil),
 		s.mockRoleBindings.EXPECT().Get("app-name", v1.GetOptions{}).Return(rb, nil),
@@ -2747,14 +3375,21 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountNewClusterRoleCreate
 	defer ctrl.Finish()
 
 	podSpec := getBasicPodspec()
-	podSpec.ServiceAccount = &specs.ServiceAccountSpec{}
-	podSpec.ServiceAccount.Global = true
-	podSpec.ServiceAccount.AutomountServiceAccountToken = boolPtr(true)
-	podSpec.ServiceAccount.Rules = []specs.PolicyRule{
-		{
-			APIGroups: []string{""},
-			Resources: []string{"pods"},
-			Verbs:     []string{"get", "watch", "list"},
+	podSpec.ServiceAccount = &specs.PrimeServiceAccountSpecV3{
+		ServiceAccountSpecV3: specs.ServiceAccountSpecV3{
+			AutomountServiceAccountToken: boolPtr(true),
+			Roles: []specs.Role{
+				{
+					Global: true,
+					Rules: []specs.PolicyRule{
+						{
+							APIGroups: []string{""},
+							Resources: []string{"pods"},
+							Verbs:     []string{"get", "watch", "list"},
+						},
+					},
+				},
+			},
 		},
 	}
 
@@ -2775,6 +3410,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountNewClusterRoleCreate
 			Selector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"juju-app": "app-name"},
 			},
+			RevisionHistoryLimit: int32Ptr(0),
 			Template: core.PodTemplateSpec{
 				ObjectMeta: v1.ObjectMeta{
 					GenerateName: "app-name-",
@@ -2845,7 +3481,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountNewClusterRoleCreate
 	}
 	crb := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: v1.ObjectMeta{
-			Name:      "test-app-name",
+			Name:      "app-name-test-app-name",
 			Namespace: "test",
 			Labels:    map[string]string{"juju-app": "app-name", "juju-model": "test"},
 			Annotations: map[string]string{
@@ -2872,7 +3508,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountNewClusterRoleCreate
 			Return(nil, s.k8sNotFoundError()),
 		s.mockServiceAccounts.EXPECT().Create(svcAccount).Return(svcAccount, nil),
 		s.mockClusterRoles.EXPECT().Create(cr).Return(cr, nil),
-		s.mockClusterRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==app-name,juju-model==test"}).
+		s.mockClusterRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name,juju-model=test"}).
 			Return(&rbacv1.ClusterRoleBindingList{Items: []rbacv1.ClusterRoleBinding{}}, nil),
 		s.mockClusterRoleBindings.EXPECT().Create(crb).Return(crb, nil),
 		s.mockSecrets.EXPECT().Create(secretArg).Return(secretArg, nil),
@@ -2912,14 +3548,21 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountNewClusterRoleUpdate
 	defer ctrl.Finish()
 
 	podSpec := getBasicPodspec()
-	podSpec.ServiceAccount = &specs.ServiceAccountSpec{}
-	podSpec.ServiceAccount.Global = true
-	podSpec.ServiceAccount.AutomountServiceAccountToken = boolPtr(true)
-	podSpec.ServiceAccount.Rules = []specs.PolicyRule{
-		{
-			APIGroups: []string{""},
-			Resources: []string{"pods"},
-			Verbs:     []string{"get", "watch", "list"},
+	podSpec.ServiceAccount = &specs.PrimeServiceAccountSpecV3{
+		ServiceAccountSpecV3: specs.ServiceAccountSpecV3{
+			AutomountServiceAccountToken: boolPtr(true),
+			Roles: []specs.Role{
+				{
+					Global: true,
+					Rules: []specs.PolicyRule{
+						{
+							APIGroups: []string{""},
+							Resources: []string{"pods"},
+							Verbs:     []string{"get", "watch", "list"},
+						},
+					},
+				},
+			},
 		},
 	}
 
@@ -2940,6 +3583,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountNewClusterRoleUpdate
 			Selector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"juju-app": "app-name"},
 			},
+			RevisionHistoryLimit: int32Ptr(0),
 			Template: core.PodTemplateSpec{
 				ObjectMeta: v1.ObjectMeta{
 					GenerateName: "app-name-",
@@ -3010,7 +3654,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountNewClusterRoleUpdate
 	}
 	crb := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: v1.ObjectMeta{
-			Name:      "test-app-name",
+			Name:      "app-name-test-app-name",
 			Namespace: "test",
 			Labels:    map[string]string{"juju-app": "app-name", "juju-model": "test"},
 			Annotations: map[string]string{
@@ -3037,18 +3681,18 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountNewClusterRoleUpdate
 		s.mockStatefulSets.EXPECT().Get("juju-operator-app-name", v1.GetOptions{}).
 			Return(nil, s.k8sNotFoundError()),
 		s.mockServiceAccounts.EXPECT().Create(svcAccount).Return(nil, s.k8sAlreadyExistsError()),
-		s.mockServiceAccounts.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==app-name"}).
+		s.mockServiceAccounts.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name"}).
 			Return(&core.ServiceAccountList{Items: []core.ServiceAccount{*svcAccount}}, nil),
 		s.mockServiceAccounts.EXPECT().Update(svcAccount).Return(svcAccount, nil),
 		s.mockClusterRoles.EXPECT().Create(cr).Return(nil, s.k8sAlreadyExistsError()),
-		s.mockClusterRoles.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==app-name,juju-model==test"}).
+		s.mockClusterRoles.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name,juju-model=test"}).
 			Return(&rbacv1.ClusterRoleList{Items: []rbacv1.ClusterRole{*cr}}, nil),
 		s.mockClusterRoles.EXPECT().Update(cr).Return(cr, nil),
-		s.mockClusterRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==app-name,juju-model==test"}).
+		s.mockClusterRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name,juju-model=test"}).
 			Return(&rbacv1.ClusterRoleBindingList{Items: []rbacv1.ClusterRoleBinding{*crb}}, nil),
-		s.mockClusterRoleBindings.EXPECT().Delete("test-app-name", s.deleteOptions(v1.DeletePropagationForeground, crbUID)).Return(nil),
-		s.mockClusterRoleBindings.EXPECT().Get("test-app-name", v1.GetOptions{}).Return(crb, nil),
-		s.mockClusterRoleBindings.EXPECT().Get("test-app-name", v1.GetOptions{}).Return(nil, s.k8sNotFoundError()),
+		s.mockClusterRoleBindings.EXPECT().Delete("app-name-test-app-name", s.deleteOptions(v1.DeletePropagationForeground, crbUID)).Return(nil),
+		s.mockClusterRoleBindings.EXPECT().Get("app-name-test-app-name", v1.GetOptions{}).Return(crb, nil),
+		s.mockClusterRoleBindings.EXPECT().Get("app-name-test-app-name", v1.GetOptions{}).Return(nil, s.k8sNotFoundError()),
 		s.mockClusterRoleBindings.EXPECT().Create(crb).Return(crb, nil),
 		s.mockSecrets.EXPECT().Create(secretArg).Return(secretArg, nil),
 		s.mockStatefulSets.EXPECT().Get("app-name", v1.GetOptions{}).
@@ -3099,31 +3743,32 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountAndK8sServiceAccount
 	defer ctrl.Finish()
 
 	podSpec := getBasicPodspec()
-	podSpec.ServiceAccount = &specs.ServiceAccountSpec{}
-	podSpec.ServiceAccount.AutomountServiceAccountToken = boolPtr(true)
-	podSpec.ServiceAccount.Rules = []specs.PolicyRule{
-		{
-			APIGroups: []string{""},
-			Resources: []string{"pods"},
-			Verbs:     []string{"get", "watch", "list"},
-		},
-	}
+	podSpec.ServiceAccount = primeServiceAccount
 
-	k8sSASpec := k8sspecs.K8sServiceAccountSpec{
-		Name: "k8sRBAC1",
-	}
-	k8sSASpec.AutomountServiceAccountToken = boolPtr(true)
-	k8sSASpec.Rules = []specs.PolicyRule{
-		{
-			APIGroups: []string{""},
-			Resources: []string{"pods"},
-			Verbs:     []string{"get", "watch", "list"},
-		},
-	}
 	podSpec.ProviderPod = &k8sspecs.K8sPodSpec{
 		KubernetesResources: &k8sspecs.KubernetesResources{
-			ServiceAccounts: []k8sspecs.K8sServiceAccountSpec{
-				k8sSASpec,
+			K8sRBACResources: k8sspecs.K8sRBACResources{
+				ServiceAccounts: []k8sspecs.K8sServiceAccountSpec{
+					{
+						Name: "sa2",
+						ServiceAccountSpecV3: specs.ServiceAccountSpecV3{
+
+							AutomountServiceAccountToken: boolPtr(true),
+							Roles: []specs.Role{
+								{
+									Name: "role2",
+									Rules: []specs.PolicyRule{
+										{
+											APIGroups: []string{""},
+											Resources: []string{"pods"},
+											Verbs:     []string{"get", "watch", "list"},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
 			},
 		},
 	}
@@ -3145,6 +3790,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountAndK8sServiceAccount
 			Selector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"juju-app": "app-name"},
 			},
+			RevisionHistoryLimit: int32Ptr(0),
 			Template: core.PodTemplateSpec{
 				ObjectMeta: v1.ObjectMeta{
 					GenerateName: "app-name-",
@@ -3238,7 +3884,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountAndK8sServiceAccount
 
 	svcAccount2 := &core.ServiceAccount{
 		ObjectMeta: v1.ObjectMeta{
-			Name:      "k8sRBAC1",
+			Name:      "sa2",
 			Namespace: "test",
 			Labels:    map[string]string{"juju-app": "app-name"},
 			Annotations: map[string]string{
@@ -3250,7 +3896,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountAndK8sServiceAccount
 	}
 	role2 := &rbacv1.Role{
 		ObjectMeta: v1.ObjectMeta{
-			Name:      "k8sRBAC1",
+			Name:      "role2",
 			Namespace: "test",
 			Labels:    map[string]string{"juju-app": "app-name"},
 			Annotations: map[string]string{
@@ -3268,7 +3914,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountAndK8sServiceAccount
 	}
 	rb2 := &rbacv1.RoleBinding{
 		ObjectMeta: v1.ObjectMeta{
-			Name:      "k8sRBAC1",
+			Name:      "sa2-role2",
 			Namespace: "test",
 			Labels:    map[string]string{"juju-app": "app-name"},
 			Annotations: map[string]string{
@@ -3277,13 +3923,13 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountAndK8sServiceAccount
 			},
 		},
 		RoleRef: rbacv1.RoleRef{
-			Name: "k8sRBAC1",
+			Name: "role2",
 			Kind: "Role",
 		},
 		Subjects: []rbacv1.Subject{
 			{
 				Kind:      rbacv1.ServiceAccountKind,
-				Name:      "k8sRBAC1",
+				Name:      "sa2",
 				Namespace: "test",
 			},
 		},
@@ -3296,13 +3942,13 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountAndK8sServiceAccount
 
 		s.mockServiceAccounts.EXPECT().Create(svcAccount1).Return(svcAccount1, nil),
 		s.mockRoles.EXPECT().Create(role1).Return(role1, nil),
-		s.mockRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==app-name"}).
+		s.mockRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name"}).
 			Return(&rbacv1.RoleBindingList{Items: []rbacv1.RoleBinding{}}, nil),
 		s.mockRoleBindings.EXPECT().Create(rb1).Return(rb1, nil),
 
 		s.mockServiceAccounts.EXPECT().Create(svcAccount2).Return(svcAccount2, nil),
 		s.mockRoles.EXPECT().Create(role2).Return(role2, nil),
-		s.mockRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==app-name"}).
+		s.mockRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name"}).
 			Return(&rbacv1.RoleBindingList{Items: []rbacv1.RoleBinding{}}, nil),
 		s.mockRoleBindings.EXPECT().Create(rb2).Return(rb2, nil),
 
@@ -3343,42 +3989,42 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountAndK8sServiceAccount
 	defer ctrl.Finish()
 
 	podSpec := getBasicPodspec()
-	podSpec.ServiceAccount = &specs.ServiceAccountSpec{}
-	podSpec.ServiceAccount.AutomountServiceAccountToken = boolPtr(true)
-	podSpec.ServiceAccount.Rules = []specs.PolicyRule{
-		{
-			APIGroups: []string{""},
-			Resources: []string{"pods"},
-			Verbs:     []string{"get", "watch", "list"},
-		},
-	}
+	podSpec.ServiceAccount = primeServiceAccount
 
-	k8sSASpec := k8sspecs.K8sServiceAccountSpec{
-		Name: "k8sRBAC1",
-	}
-	k8sSASpec.Global = true
-	k8sSASpec.AutomountServiceAccountToken = boolPtr(true)
-	k8sSASpec.Rules = []specs.PolicyRule{
-		{
-			APIGroups: []string{""},
-			Resources: []string{"pods"},
-			Verbs:     []string{"get", "watch", "list"},
-		},
-		{
-			NonResourceURLs: []string{"/healthz", "/healthz/*"},
-			Verbs:           []string{"get", "post"},
-		},
-		{
-			APIGroups:     []string{"rbac.authorization.k8s.io"},
-			Resources:     []string{"clusterroles"},
-			Verbs:         []string{"bind"},
-			ResourceNames: []string{"admin", "edit", "view"},
-		},
-	}
 	podSpec.ProviderPod = &k8sspecs.K8sPodSpec{
 		KubernetesResources: &k8sspecs.KubernetesResources{
-			ServiceAccounts: []k8sspecs.K8sServiceAccountSpec{
-				k8sSASpec,
+			K8sRBACResources: k8sspecs.K8sRBACResources{
+				ServiceAccounts: []k8sspecs.K8sServiceAccountSpec{
+					{
+						Name: "sa2",
+						ServiceAccountSpecV3: specs.ServiceAccountSpecV3{
+							AutomountServiceAccountToken: boolPtr(true),
+							Roles: []specs.Role{
+								{
+									Name:   "cluster-role2",
+									Global: true,
+									Rules: []specs.PolicyRule{
+										{
+											APIGroups: []string{""},
+											Resources: []string{"pods"},
+											Verbs:     []string{"get", "watch", "list"},
+										},
+										{
+											NonResourceURLs: []string{"/healthz", "/healthz/*"},
+											Verbs:           []string{"get", "post"},
+										},
+										{
+											APIGroups:     []string{"rbac.authorization.k8s.io"},
+											Resources:     []string{"clusterroles"},
+											Verbs:         []string{"bind"},
+											ResourceNames: []string{"admin", "edit", "view"},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
 			},
 		},
 	}
@@ -3401,6 +4047,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountAndK8sServiceAccount
 			Selector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"juju-app": "app-name"},
 			},
+			RevisionHistoryLimit: int32Ptr(0),
 			Template: core.PodTemplateSpec{
 				ObjectMeta: v1.ObjectMeta{
 					GenerateName: "app-name-",
@@ -3494,7 +4141,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountAndK8sServiceAccount
 
 	svcAccount2 := &core.ServiceAccount{
 		ObjectMeta: v1.ObjectMeta{
-			Name:      "k8sRBAC1",
+			Name:      "sa2",
 			Namespace: "test",
 			Labels:    map[string]string{"juju-app": "app-name"},
 			Annotations: map[string]string{
@@ -3506,7 +4153,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountAndK8sServiceAccount
 	}
 	clusterrole2 := &rbacv1.ClusterRole{
 		ObjectMeta: v1.ObjectMeta{
-			Name:      "test-k8sRBAC1",
+			Name:      "test-cluster-role2",
 			Namespace: "test",
 			Labels:    map[string]string{"juju-app": "app-name", "juju-model": "test"},
 			Annotations: map[string]string{
@@ -3534,7 +4181,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountAndK8sServiceAccount
 	}
 	crb2 := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: v1.ObjectMeta{
-			Name:      "test-k8sRBAC1",
+			Name:      "sa2-test-cluster-role2",
 			Namespace: "test",
 			Labels:    map[string]string{"juju-app": "app-name", "juju-model": "test"},
 			Annotations: map[string]string{
@@ -3543,13 +4190,13 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountAndK8sServiceAccount
 			},
 		},
 		RoleRef: rbacv1.RoleRef{
-			Name: "test-k8sRBAC1",
+			Name: "test-cluster-role2",
 			Kind: "ClusterRole",
 		},
 		Subjects: []rbacv1.Subject{
 			{
 				Kind:      rbacv1.ServiceAccountKind,
-				Name:      "k8sRBAC1",
+				Name:      "sa2",
 				Namespace: "test",
 			},
 		},
@@ -3562,13 +4209,332 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountAndK8sServiceAccount
 
 		s.mockServiceAccounts.EXPECT().Create(svcAccount1).Return(svcAccount1, nil),
 		s.mockRoles.EXPECT().Create(role1).Return(role1, nil),
-		s.mockRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==app-name"}).
+		s.mockRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name"}).
 			Return(&rbacv1.RoleBindingList{Items: []rbacv1.RoleBinding{}}, nil),
 		s.mockRoleBindings.EXPECT().Create(rb1).Return(rb1, nil),
 
 		s.mockServiceAccounts.EXPECT().Create(svcAccount2).Return(svcAccount2, nil),
 		s.mockClusterRoles.EXPECT().Create(clusterrole2).Return(clusterrole2, nil),
-		s.mockClusterRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==app-name,juju-model==test"}).
+		s.mockClusterRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name,juju-model=test"}).
+			Return(&rbacv1.ClusterRoleBindingList{Items: []rbacv1.ClusterRoleBinding{}}, nil),
+		s.mockClusterRoleBindings.EXPECT().Create(crb2).Return(crb2, nil),
+
+		s.mockSecrets.EXPECT().Create(secretArg).Return(secretArg, nil),
+		s.mockStatefulSets.EXPECT().Get("app-name", v1.GetOptions{}).
+			Return(nil, s.k8sNotFoundError()),
+		s.mockServices.EXPECT().Get("app-name", v1.GetOptions{}).
+			Return(nil, s.k8sNotFoundError()),
+		s.mockServices.EXPECT().Update(serviceArg).
+			Return(nil, s.k8sNotFoundError()),
+		s.mockServices.EXPECT().Create(serviceArg).
+			Return(nil, nil),
+		s.mockDeployments.EXPECT().Update(deploymentArg).
+			Return(nil, s.k8sNotFoundError()),
+		s.mockDeployments.EXPECT().Create(deploymentArg).
+			Return(nil, nil),
+	)
+
+	params := &caas.ServiceParams{
+		PodSpec: podSpec,
+		ResourceTags: map[string]string{
+			"juju-controller-uuid": testing.ControllerTag.Id(),
+			"fred":                 "mary",
+		},
+		OperatorImagePath: "operator/image-path",
+	}
+	err = s.broker.EnsureService("app-name", func(_ string, _ status.Status, _ string, _ map[string]interface{}) error { return nil }, params, 2, application.ConfigAttributes{
+		"kubernetes-service-type":            "nodeIP",
+		"kubernetes-service-loadbalancer-ip": "10.0.0.1",
+		"kubernetes-service-externalname":    "ext-name",
+		"kubernetes-service-annotations":     map[string]interface{}{"a": "b"},
+	})
+	c.Assert(err, jc.ErrorIsNil)
+}
+
+func (s *K8sBrokerSuite) TestEnsureServiceWithServiceAccountAndK8sServiceAccountWithoutRoleNames(c *gc.C) {
+	ctrl := s.setupController(c)
+	defer ctrl.Finish()
+
+	podSpec := getBasicPodspec()
+	podSpec.ServiceAccount = primeServiceAccount
+
+	podSpec.ProviderPod = &k8sspecs.K8sPodSpec{
+		KubernetesResources: &k8sspecs.KubernetesResources{
+			K8sRBACResources: k8sspecs.K8sRBACResources{
+				ServiceAccounts: []k8sspecs.K8sServiceAccountSpec{
+					{
+						Name: "sa-foo",
+						ServiceAccountSpecV3: specs.ServiceAccountSpecV3{
+							AutomountServiceAccountToken: boolPtr(true),
+							Roles: []specs.Role{
+								{
+									Global: true,
+									Rules: []specs.PolicyRule{
+										{
+											APIGroups: []string{""},
+											Resources: []string{"pods"},
+											Verbs:     []string{"get", "watch", "list"},
+										},
+										{
+											NonResourceURLs: []string{"/healthz", "/healthz/*"},
+											Verbs:           []string{"get", "post"},
+										},
+										{
+											APIGroups:     []string{"rbac.authorization.k8s.io"},
+											Resources:     []string{"clusterroles"},
+											Verbs:         []string{"bind"},
+											ResourceNames: []string{"admin", "edit", "view"},
+										},
+									},
+								},
+								{
+									Rules: []specs.PolicyRule{
+										{
+											APIGroups: []string{""},
+											Resources: []string{"pods"},
+											Verbs:     []string{"get", "watch", "list"},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	numUnits := int32(2)
+	workloadSpec, err := provider.PrepareWorkloadSpec("app-name", "app-name", podSpec, "operator/image-path")
+	c.Assert(err, jc.ErrorIsNil)
+
+	deploymentArg := &appsv1.Deployment{
+		ObjectMeta: v1.ObjectMeta{
+			Name:   "app-name",
+			Labels: map[string]string{"juju-app": "app-name"},
+			Annotations: map[string]string{
+				"juju.io/controller": testing.ControllerTag.Id(),
+				"fred":               "mary",
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &numUnits,
+			Selector: &v1.LabelSelector{
+				MatchLabels: map[string]string{"juju-app": "app-name"},
+			},
+			RevisionHistoryLimit: int32Ptr(0),
+			Template: core.PodTemplateSpec{
+				ObjectMeta: v1.ObjectMeta{
+					GenerateName: "app-name-",
+					Labels: map[string]string{
+						"juju-app": "app-name",
+					},
+					Annotations: map[string]string{
+						"apparmor.security.beta.kubernetes.io/pod": "runtime/default",
+						"seccomp.security.beta.kubernetes.io/pod":  "docker/default",
+						"juju.io/controller":                       testing.ControllerTag.Id(),
+						"fred":                                     "mary",
+					},
+				},
+				Spec: provider.PodSpec(workloadSpec),
+			},
+		},
+	}
+	serviceArg := &core.Service{
+		ObjectMeta: v1.ObjectMeta{
+			Name:   "app-name",
+			Labels: map[string]string{"juju-app": "app-name"},
+			Annotations: map[string]string{
+				"fred":               "mary",
+				"a":                  "b",
+				"juju.io/controller": testing.ControllerTag.Id(),
+			}},
+		Spec: core.ServiceSpec{
+			Selector: map[string]string{"juju-app": "app-name"},
+			Type:     "nodeIP",
+			Ports: []core.ServicePort{
+				{Port: 80, TargetPort: intstr.FromInt(80), Protocol: "TCP"},
+				{Port: 8080, Protocol: "TCP", Name: "fred"},
+			},
+			LoadBalancerIP: "10.0.0.1",
+			ExternalName:   "ext-name",
+		},
+	}
+
+	svcAccount1 := &core.ServiceAccount{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "app-name",
+			Namespace: "test",
+			Labels:    map[string]string{"juju-app": "app-name"},
+			Annotations: map[string]string{
+				"fred":               "mary",
+				"juju.io/controller": testing.ControllerTag.Id(),
+			},
+		},
+		AutomountServiceAccountToken: boolPtr(true),
+	}
+	role1 := &rbacv1.Role{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "app-name",
+			Namespace: "test",
+			Labels:    map[string]string{"juju-app": "app-name"},
+			Annotations: map[string]string{
+				"fred":               "mary",
+				"juju.io/controller": testing.ControllerTag.Id(),
+			},
+		},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups: []string{""},
+				Resources: []string{"pods"},
+				Verbs:     []string{"get", "watch", "list"},
+			},
+		},
+	}
+	rb1 := &rbacv1.RoleBinding{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "app-name",
+			Namespace: "test",
+			Labels:    map[string]string{"juju-app": "app-name"},
+			Annotations: map[string]string{
+				"fred":               "mary",
+				"juju.io/controller": testing.ControllerTag.Id(),
+			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			Name: "app-name",
+			Kind: "Role",
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:      rbacv1.ServiceAccountKind,
+				Name:      "app-name",
+				Namespace: "test",
+			},
+		},
+	}
+
+	svcAccount2 := &core.ServiceAccount{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "sa-foo",
+			Namespace: "test",
+			Labels:    map[string]string{"juju-app": "app-name"},
+			Annotations: map[string]string{
+				"fred":               "mary",
+				"juju.io/controller": testing.ControllerTag.Id(),
+			},
+		},
+		AutomountServiceAccountToken: boolPtr(true),
+	}
+	clusterrole2 := &rbacv1.ClusterRole{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "test-sa-foo",
+			Namespace: "test",
+			Labels:    map[string]string{"juju-app": "app-name", "juju-model": "test"},
+			Annotations: map[string]string{
+				"fred":               "mary",
+				"juju.io/controller": testing.ControllerTag.Id(),
+			},
+		},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups: []string{""},
+				Resources: []string{"pods"},
+				Verbs:     []string{"get", "watch", "list"},
+			},
+			{
+				NonResourceURLs: []string{"/healthz", "/healthz/*"},
+				Verbs:           []string{"get", "post"},
+			},
+			{
+				APIGroups:     []string{"rbac.authorization.k8s.io"},
+				Resources:     []string{"clusterroles"},
+				Verbs:         []string{"bind"},
+				ResourceNames: []string{"admin", "edit", "view"},
+			},
+		},
+	}
+	role2 := &rbacv1.Role{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "sa-foo1",
+			Namespace: "test",
+			Labels:    map[string]string{"juju-app": "app-name"},
+			Annotations: map[string]string{
+				"fred":               "mary",
+				"juju.io/controller": testing.ControllerTag.Id(),
+			},
+		},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups: []string{""},
+				Resources: []string{"pods"},
+				Verbs:     []string{"get", "watch", "list"},
+			},
+		},
+	}
+	crb2 := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "sa-foo-test-sa-foo",
+			Namespace: "test",
+			Labels:    map[string]string{"juju-app": "app-name", "juju-model": "test"},
+			Annotations: map[string]string{
+				"fred":               "mary",
+				"juju.io/controller": testing.ControllerTag.Id(),
+			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			Name: "test-sa-foo",
+			Kind: "ClusterRole",
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:      rbacv1.ServiceAccountKind,
+				Name:      "sa-foo",
+				Namespace: "test",
+			},
+		},
+	}
+	rb2 := &rbacv1.RoleBinding{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      "sa-foo-sa-foo1",
+			Namespace: "test",
+			Labels:    map[string]string{"juju-app": "app-name"},
+			Annotations: map[string]string{
+				"fred":               "mary",
+				"juju.io/controller": testing.ControllerTag.Id(),
+			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			Name: "sa-foo1",
+			Kind: "Role",
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:      rbacv1.ServiceAccountKind,
+				Name:      "sa-foo",
+				Namespace: "test",
+			},
+		},
+	}
+
+	secretArg := s.getOCIImageSecret(c, map[string]string{"fred": "mary"})
+	gomock.InOrder(
+		s.mockStatefulSets.EXPECT().Get("juju-operator-app-name", v1.GetOptions{}).
+			Return(nil, s.k8sNotFoundError()),
+
+		s.mockServiceAccounts.EXPECT().Create(svcAccount1).Return(svcAccount1, nil),
+		s.mockRoles.EXPECT().Create(role1).Return(role1, nil),
+		s.mockRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name"}).
+			Return(&rbacv1.RoleBindingList{Items: []rbacv1.RoleBinding{}}, nil),
+		s.mockRoleBindings.EXPECT().Create(rb1).Return(rb1, nil),
+
+		s.mockServiceAccounts.EXPECT().Create(svcAccount2).Return(svcAccount2, nil),
+		s.mockRoles.EXPECT().Create(role2).Return(role2, nil),
+		s.mockRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name"}).
+			Return(&rbacv1.RoleBindingList{Items: []rbacv1.RoleBinding{}}, nil),
+		s.mockRoleBindings.EXPECT().Create(rb2).Return(rb2, nil),
+		s.mockClusterRoles.EXPECT().Create(clusterrole2).Return(clusterrole2, nil),
+		s.mockClusterRoleBindings.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=app-name,juju-model=test"}).
 			Return(&rbacv1.ClusterRoleBindingList{Items: []rbacv1.ClusterRoleBinding{}}, nil),
 		s.mockClusterRoleBindings.EXPECT().Create(crb2).Return(crb2, nil),
 
@@ -3686,7 +4652,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithStorage(c *gc.C) {
 			},
 		}},
 	}
-	err = s.broker.EnsureService("app-name", nil, params, 2, application.ConfigAttributes{
+	err = s.broker.EnsureService("app-name", func(_ string, _ status.Status, _ string, _ map[string]interface{}) error { return nil }, params, 2, application.ConfigAttributes{
 		"kubernetes-service-type":            "nodeIP",
 		"kubernetes-service-loadbalancer-ip": "10.0.0.1",
 		"kubernetes-service-externalname":    "ext-name",
@@ -3725,6 +4691,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceForDeploymentWithDevices(c *gc.C) {
 			Selector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"juju-app": "app-name"},
 			},
+			RevisionHistoryLimit: int32Ptr(0),
 			Template: core.PodTemplateSpec{
 				ObjectMeta: v1.ObjectMeta{
 					GenerateName: "app-name-",
@@ -3773,7 +4740,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceForDeploymentWithDevices(c *gc.C) {
 			"juju-controller-uuid": testing.ControllerTag.Id(),
 		},
 	}
-	err = s.broker.EnsureService("app-name", nil, params, 2, application.ConfigAttributes{
+	err = s.broker.EnsureService("app-name", func(_ string, _ status.Status, _ string, _ map[string]interface{}) error { return nil }, params, 2, application.ConfigAttributes{
 		"kubernetes-service-type":            "nodeIP",
 		"kubernetes-service-loadbalancer-ip": "10.0.0.1",
 		"kubernetes-service-externalname":    "ext-name",
@@ -3831,6 +4798,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceForDaemonSetWithDevicesAndConstraintsC
 			Selector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"juju-app": "app-name"},
 			},
+			RevisionHistoryLimit: int32Ptr(0),
 			Template: core.PodTemplateSpec{
 				ObjectMeta: v1.ObjectMeta{
 					GenerateName: "app-name-",
@@ -3882,7 +4850,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceForDaemonSetWithDevicesAndConstraintsC
 		},
 		Constraints: constraints.MustParse(`tags=foo=a|b|c,^bar=d|e|f,^foo=g|h`),
 	}
-	err = s.broker.EnsureService("app-name", nil, params, 2, application.ConfigAttributes{
+	err = s.broker.EnsureService("app-name", func(_ string, _ status.Status, _ string, _ map[string]interface{}) error { return nil }, params, 2, application.ConfigAttributes{
 		"kubernetes-service-type":            "nodeIP",
 		"kubernetes-service-loadbalancer-ip": "10.0.0.1",
 		"kubernetes-service-externalname":    "ext-name",
@@ -3940,6 +4908,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceForDaemonSetWithDevicesAndConstraintsU
 			Selector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"juju-app": "app-name"},
 			},
+			RevisionHistoryLimit: int32Ptr(0),
 			Template: core.PodTemplateSpec{
 				ObjectMeta: v1.ObjectMeta{
 					GenerateName: "app-name-",
@@ -3972,7 +4941,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceForDaemonSetWithDevicesAndConstraintsU
 		s.mockDaemonSets.EXPECT().Create(daemonSetArg).
 			Return(nil, s.k8sAlreadyExistsError()),
 		s.mockDaemonSets.EXPECT().List(v1.ListOptions{
-			LabelSelector: "juju-app==app-name",
+			LabelSelector: "juju-app=app-name",
 		}).Return(&appsv1.DaemonSetList{Items: []appsv1.DaemonSet{*daemonSetArg}}, nil),
 		s.mockDaemonSets.EXPECT().Update(daemonSetArg).
 			Return(daemonSetArg, nil),
@@ -3996,7 +4965,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceForDaemonSetWithDevicesAndConstraintsU
 		},
 		Constraints: constraints.MustParse(`tags=foo=a|b|c,^bar=d|e|f,^foo=g|h`),
 	}
-	err = s.broker.EnsureService("app-name", nil, params, 2, application.ConfigAttributes{
+	err = s.broker.EnsureService("app-name", func(_ string, _ status.Status, _ string, _ map[string]interface{}) error { return nil }, params, 2, application.ConfigAttributes{
 		"kubernetes-service-type":            "nodeIP",
 		"kubernetes-service-loadbalancer-ip": "10.0.0.1",
 		"kubernetes-service-externalname":    "ext-name",
@@ -4084,7 +5053,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceForStatefulSetWithDevices(c *gc.C) {
 			"juju-controller-uuid": testing.ControllerTag.Id(),
 		},
 	}
-	err = s.broker.EnsureService("app-name", nil, params, 2, application.ConfigAttributes{
+	err = s.broker.EnsureService("app-name", func(_ string, _ status.Status, _ string, _ map[string]interface{}) error { return nil }, params, 2, application.ConfigAttributes{
 		"kubernetes-service-type":            "nodeIP",
 		"kubernetes-service-loadbalancer-ip": "10.0.0.1",
 		"kubernetes-service-externalname":    "ext-name",
@@ -4163,7 +5132,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithConstraints(c *gc.C) {
 		},
 		Constraints: constraints.MustParse("mem=64 cpu-power=500"),
 	}
-	err = s.broker.EnsureService("app-name", nil, params, 2, application.ConfigAttributes{
+	err = s.broker.EnsureService("app-name", func(_ string, _ status.Status, _ string, _ map[string]interface{}) error { return nil }, params, 2, application.ConfigAttributes{
 		"kubernetes-service-type":            "nodeIP",
 		"kubernetes-service-loadbalancer-ip": "10.0.0.1",
 		"kubernetes-service-externalname":    "ext-name",
@@ -4255,7 +5224,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithNodeAffinity(c *gc.C) {
 		},
 		Constraints: constraints.MustParse(`tags=foo=a|b|c,^bar=d|e|f,^foo=g|h`),
 	}
-	err = s.broker.EnsureService("app-name", nil, params, 2, application.ConfigAttributes{
+	err = s.broker.EnsureService("app-name", func(_ string, _ status.Status, _ string, _ map[string]interface{}) error { return nil }, params, 2, application.ConfigAttributes{
 		"kubernetes-service-type":            "nodeIP",
 		"kubernetes-service-loadbalancer-ip": "10.0.0.1",
 		"kubernetes-service-externalname":    "ext-name",
@@ -4339,7 +5308,7 @@ func (s *K8sBrokerSuite) TestEnsureServiceWithZones(c *gc.C) {
 		},
 		Constraints: constraints.MustParse(`zones=a,b,c`),
 	}
-	err = s.broker.EnsureService("app-name", nil, params, 2, application.ConfigAttributes{
+	err = s.broker.EnsureService("app-name", func(_ string, _ status.Status, _ string, _ map[string]interface{}) error { return nil }, params, 2, application.ConfigAttributes{
 		"kubernetes-service-type":            "nodeIP",
 		"kubernetes-service-loadbalancer-ip": "10.0.0.1",
 		"kubernetes-service-externalname":    "ext-name",
@@ -4414,7 +5383,7 @@ func (s *K8sBrokerSuite) TestAnnotateUnitByUID(c *gc.C) {
 
 	gomock.InOrder(
 		s.mockPods.EXPECT().Get("uuid", v1.GetOptions{}).Return(nil, s.k8sNotFoundError()),
-		s.mockPods.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app==appname"}).Return(podList, nil),
+		s.mockPods.EXPECT().List(v1.ListOptions{LabelSelector: "juju-app=appname"}).Return(podList, nil),
 		s.mockPods.EXPECT().Update(updatePod).Return(updatePod, nil),
 	)
 
@@ -4461,7 +5430,7 @@ func (s *K8sBrokerSuite) TestWatchContainerStart(c *gc.C) {
 
 	gomock.InOrder(
 		s.mockPods.EXPECT().List(
-			listOptionsLabelSelectorMatcher("juju-app==test"),
+			listOptionsLabelSelectorMatcher("juju-app=test"),
 		).DoAndReturn(func(...interface{}) (*core.PodList, error) {
 			return podList, nil
 		}),
@@ -4549,7 +5518,7 @@ func (s *K8sBrokerSuite) TestWatchContainerStartDefault(c *gc.C) {
 
 	gomock.InOrder(
 		s.mockPods.EXPECT().List(
-			listOptionsLabelSelectorMatcher("juju-app==test"),
+			listOptionsLabelSelectorMatcher("juju-app=test"),
 		).Return(podList, nil),
 	)
 
@@ -4633,7 +5602,7 @@ func (s *K8sBrokerSuite) TestWatchContainerStartDefaultWaitForUnit(c *gc.C) {
 
 	gomock.InOrder(
 		s.mockPods.EXPECT().List(
-			listOptionsLabelSelectorMatcher("juju-app==test"),
+			listOptionsLabelSelectorMatcher("juju-app=test"),
 		).Return(podList, nil),
 	)
 
@@ -4691,6 +5660,7 @@ func (s *K8sBrokerSuite) TestUpgradeController(c *gc.C) {
 			Labels: map[string]string{"juju-operator": "controller"},
 		},
 		Spec: apps.StatefulSetSpec{
+			RevisionHistoryLimit: int32Ptr(0),
 			Template: core.PodTemplateSpec{
 				ObjectMeta: v1.ObjectMeta{
 					Annotations: map[string]string{

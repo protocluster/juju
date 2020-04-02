@@ -27,7 +27,7 @@ import (
 	"github.com/juju/juju/testing"
 )
 
-func (s *K8sBrokerSuite) assertCustomerResourceDefinitions(c *gc.C, crds map[string]apiextensionsv1beta1.CustomResourceDefinitionSpec, assertCalls ...*gomock.Call) {
+func (s *K8sBrokerSuite) assertCustomerResourceDefinitions(c *gc.C, crds []k8sspecs.K8sCustomResourceDefinitionSpec, assertCalls ...*gomock.Call) {
 
 	basicPodSpec := getBasicPodspec()
 	basicPodSpec.ProviderPod = &k8sspecs.K8sPodSpec{
@@ -54,6 +54,7 @@ func (s *K8sBrokerSuite) assertCustomerResourceDefinitions(c *gc.C, crds map[str
 			Selector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"juju-app": "app-name"},
 			},
+			RevisionHistoryLimit: int32Ptr(0),
 			Template: core.PodTemplateSpec{
 				ObjectMeta: v1.ObjectMeta{
 					Labels: map[string]string{"juju-app": "app-name"},
@@ -130,42 +131,45 @@ func (s *K8sBrokerSuite) TestEnsureServiceCustomResourceDefinitionsCreate(c *gc.
 	ctrl := s.setupController(c)
 	defer ctrl.Finish()
 
-	crds := map[string]apiextensionsv1beta1.CustomResourceDefinitionSpec{
-		"tfjobs.kubeflow.org": {
-			Names: apiextensionsv1beta1.CustomResourceDefinitionNames{
-				Kind:     "TFJob",
-				Singular: "tfjob",
-				Plural:   "tfjobs",
-			},
-			Version: "v1alpha2",
-			Group:   "kubeflow.org",
-			Scope:   "Namespaced",
-			Validation: &apiextensionsv1beta1.CustomResourceValidation{
-				OpenAPIV3Schema: &apiextensionsv1beta1.JSONSchemaProps{
-					Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
-						"tfReplicaSpecs": {
-							Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
-								"Worker": {
-									Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
-										"replicas": {
-											Type:    "integer",
-											Minimum: float64Ptr(1),
+	crds := []k8sspecs.K8sCustomResourceDefinitionSpec{
+		{
+			Name: "tfjobs.kubeflow.org",
+			Spec: apiextensionsv1beta1.CustomResourceDefinitionSpec{
+				Names: apiextensionsv1beta1.CustomResourceDefinitionNames{
+					Kind:     "TFJob",
+					Singular: "tfjob",
+					Plural:   "tfjobs",
+				},
+				Version: "v1alpha2",
+				Group:   "kubeflow.org",
+				Scope:   "Namespaced",
+				Validation: &apiextensionsv1beta1.CustomResourceValidation{
+					OpenAPIV3Schema: &apiextensionsv1beta1.JSONSchemaProps{
+						Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+							"tfReplicaSpecs": {
+								Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+									"Worker": {
+										Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+											"replicas": {
+												Type:    "integer",
+												Minimum: float64Ptr(1),
+											},
 										},
 									},
-								},
-								"PS": {
-									Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
-										"replicas": {
-											Type: "integer", Minimum: float64Ptr(1),
+									"PS": {
+										Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+											"replicas": {
+												Type: "integer", Minimum: float64Ptr(1),
+											},
 										},
 									},
-								},
-								"Chief": {
-									Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
-										"replicas": {
-											Type:    "integer",
-											Minimum: float64Ptr(1),
-											Maximum: float64Ptr(1),
+									"Chief": {
+										Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+											"replicas": {
+												Type:    "integer",
+												Minimum: float64Ptr(1),
+												Maximum: float64Ptr(1),
+											},
 										},
 									},
 								},
@@ -180,7 +184,6 @@ func (s *K8sBrokerSuite) TestEnsureServiceCustomResourceDefinitionsCreate(c *gc.
 	crd := &apiextensionsv1beta1.CustomResourceDefinition{
 		ObjectMeta: v1.ObjectMeta{
 			Name:        "tfjobs.kubeflow.org",
-			Namespace:   "test",
 			Labels:      map[string]string{"juju-app": "app-name", "juju-model": "test"},
 			Annotations: map[string]string{"juju.io/controller": testing.ControllerTag.Id()},
 		},
@@ -240,42 +243,45 @@ func (s *K8sBrokerSuite) TestEnsureServiceCustomResourceDefinitionsUpdate(c *gc.
 	ctrl := s.setupController(c)
 	defer ctrl.Finish()
 
-	crds := map[string]apiextensionsv1beta1.CustomResourceDefinitionSpec{
-		"tfjobs.kubeflow.org": {
-			Names: apiextensionsv1beta1.CustomResourceDefinitionNames{
-				Kind:     "TFJob",
-				Singular: "tfjob",
-				Plural:   "tfjobs",
-			},
-			Version: "v1alpha2",
-			Group:   "kubeflow.org",
-			Scope:   "Namespaced",
-			Validation: &apiextensionsv1beta1.CustomResourceValidation{
-				OpenAPIV3Schema: &apiextensionsv1beta1.JSONSchemaProps{
-					Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
-						"tfReplicaSpecs": {
-							Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
-								"Worker": {
-									Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
-										"replicas": {
-											Type:    "integer",
-											Minimum: float64Ptr(1),
+	crds := []k8sspecs.K8sCustomResourceDefinitionSpec{
+		{
+			Name: "tfjobs.kubeflow.org",
+			Spec: apiextensionsv1beta1.CustomResourceDefinitionSpec{
+				Names: apiextensionsv1beta1.CustomResourceDefinitionNames{
+					Kind:     "TFJob",
+					Singular: "tfjob",
+					Plural:   "tfjobs",
+				},
+				Version: "v1alpha2",
+				Group:   "kubeflow.org",
+				Scope:   "Namespaced",
+				Validation: &apiextensionsv1beta1.CustomResourceValidation{
+					OpenAPIV3Schema: &apiextensionsv1beta1.JSONSchemaProps{
+						Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+							"tfReplicaSpecs": {
+								Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+									"Worker": {
+										Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+											"replicas": {
+												Type:    "integer",
+												Minimum: float64Ptr(1),
+											},
 										},
 									},
-								},
-								"PS": {
-									Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
-										"replicas": {
-											Type: "integer", Minimum: float64Ptr(1),
+									"PS": {
+										Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+											"replicas": {
+												Type: "integer", Minimum: float64Ptr(1),
+											},
 										},
 									},
-								},
-								"Chief": {
-									Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
-										"replicas": {
-											Type:    "integer",
-											Minimum: float64Ptr(1),
-											Maximum: float64Ptr(1),
+									"Chief": {
+										Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+											"replicas": {
+												Type:    "integer",
+												Minimum: float64Ptr(1),
+												Maximum: float64Ptr(1),
+											},
 										},
 									},
 								},
@@ -290,7 +296,6 @@ func (s *K8sBrokerSuite) TestEnsureServiceCustomResourceDefinitionsUpdate(c *gc.
 	crd := &apiextensionsv1beta1.CustomResourceDefinition{
 		ObjectMeta: v1.ObjectMeta{
 			Name:        "tfjobs.kubeflow.org",
-			Namespace:   "test",
 			Labels:      map[string]string{"juju-app": "app-name", "juju-model": "test"},
 			Annotations: map[string]string{"juju.io/controller": testing.ControllerTag.Id()},
 		},
@@ -375,6 +380,7 @@ func (s *K8sBrokerSuite) assertCustomerResources(c *gc.C, crs map[string][]unstr
 			Selector: &v1.LabelSelector{
 				MatchLabels: map[string]string{"juju-app": "app-name"},
 			},
+			RevisionHistoryLimit: int32Ptr(0),
 			Template: core.PodTemplateSpec{
 				ObjectMeta: v1.ObjectMeta{
 					Labels: map[string]string{"juju-app": "app-name"},
@@ -572,7 +578,6 @@ func (s *K8sBrokerSuite) TestEnsureServiceCustomResourcesCreate(c *gc.C) {
 	crd := &apiextensionsv1beta1.CustomResourceDefinition{
 		ObjectMeta: v1.ObjectMeta{
 			Name:        "tfjobs.kubeflow.org",
-			Namespace:   "test",
 			Labels:      map[string]string{"juju-app": "app-name", "juju-model": "test"},
 			Annotations: map[string]string{"juju.io/controller": testing.ControllerTag.Id()},
 		},
@@ -701,7 +706,6 @@ func (s *K8sBrokerSuite) TestEnsureServiceCustomResourcesUpdate(c *gc.C) {
 	crd := &apiextensionsv1beta1.CustomResourceDefinition{
 		ObjectMeta: v1.ObjectMeta{
 			Name:        "tfjobs.kubeflow.org",
-			Namespace:   "test",
 			Labels:      map[string]string{"juju-app": "app-name", "juju-model": "test"},
 			Annotations: map[string]string{"juju.io/controller": testing.ControllerTag.Id()},
 		},
@@ -827,7 +831,6 @@ func (s *K8sBrokerSuite) TestCRDGetter(c *gc.C) {
 	badCRDNoVersion := &apiextensionsv1beta1.CustomResourceDefinition{
 		ObjectMeta: v1.ObjectMeta{
 			Name:        "tfjobs.kubeflow.org",
-			Namespace:   "test",
 			Labels:      map[string]string{"juju-app": "app-name", "juju-model": "test"},
 			Annotations: map[string]string{"juju.io/controller": testing.ControllerTag.Id()},
 		},
@@ -887,7 +890,6 @@ func (s *K8sBrokerSuite) TestCRDGetter(c *gc.C) {
 	crd := &apiextensionsv1beta1.CustomResourceDefinition{
 		ObjectMeta: v1.ObjectMeta{
 			Name:        "tfjobs.kubeflow.org",
-			Namespace:   "test",
 			Labels:      map[string]string{"juju-app": "app-name", "juju-model": "test"},
 			Annotations: map[string]string{"juju.io/controller": testing.ControllerTag.Id()},
 		},
@@ -985,7 +987,6 @@ func (s *K8sBrokerSuite) TestGetCRDsForCRsAllGood(c *gc.C) {
 	crd1 := &apiextensionsv1beta1.CustomResourceDefinition{
 		ObjectMeta: v1.ObjectMeta{
 			Name:        "tfjobs.kubeflow.org",
-			Namespace:   "test",
 			Labels:      map[string]string{"juju-app": "app-name", "juju-model": "test"},
 			Annotations: map[string]string{"juju.io/controller": testing.ControllerTag.Id()},
 		},
@@ -1037,7 +1038,6 @@ func (s *K8sBrokerSuite) TestGetCRDsForCRsAllGood(c *gc.C) {
 	crd2 := &apiextensionsv1beta1.CustomResourceDefinition{
 		ObjectMeta: v1.ObjectMeta{
 			Name:        "scheduledworkflows.kubeflow.org",
-			Namespace:   "test",
 			Labels:      map[string]string{"juju-app": "app-name", "juju-model": "test"},
 			Annotations: map[string]string{"juju.io/controller": testing.ControllerTag.Id()},
 		},

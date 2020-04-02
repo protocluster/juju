@@ -51,7 +51,7 @@ type SpaceTestMockSuite struct {
 
 var _ = gc.Suite(&SpaceTestMockSuite{})
 
-func (s *SpaceTestMockSuite) TearDownTest(c *gc.C) {
+func (s *SpaceTestMockSuite) TearDownTest(_ *gc.C) {
 	s.api = nil
 }
 
@@ -246,7 +246,7 @@ func (s *SpaceTestMockSuite) TestRenameSpaceErrorProviderSpacesSupport(c *gc.C) 
 	args := s.getRenameArgs(from, to)
 
 	res, err := s.api.RenameSpace(args)
-	c.Assert(err, gc.ErrorMatches, "renaming provider-sourced spaces not supported")
+	c.Assert(err, gc.ErrorMatches, "modifying provider-sourced spaces not supported")
 	c.Assert(res, gc.DeepEquals, params.ErrorResults{Results: []params.ErrorResult(nil)})
 }
 
@@ -466,7 +466,7 @@ func (s *SpaceTestMockSuite) TestRemoveSpaceErrorProviderSpacesSupport(c *gc.C) 
 	args, _ := s.getRemoveArgs(space, false)
 
 	_, err := s.api.RemoveSpace(args)
-	c.Assert(err, gc.ErrorMatches, "renaming provider-sourced spaces not supported")
+	c.Assert(err, gc.ErrorMatches, "modifying provider-sourced spaces not supported")
 }
 
 func (s *SpaceTestMockSuite) expectAllTags(spaceName string) (names.ApplicationTag, names.ModelTag) {
@@ -529,13 +529,13 @@ func (s *SpaceTestMockSuite) setupSpacesAPI(c *gc.C, supportSpaces bool, isProvi
 	s.mockAuthorizer.EXPECT().AuthClient().Return(true)
 
 	s.mockBacking.EXPECT().ModelTag().Return(names.NewModelTag("123"))
-	s.mockBacking.EXPECT().ModelConfig().Return(nil, nil)
+	s.mockBacking.EXPECT().ModelConfig().Return(nil, nil).AnyTimes()
 
 	mockNetworkEnviron := environmocks.NewMockNetworkingEnviron(ctrl)
 	mockNetworkEnviron.EXPECT().SupportsSpaces(gomock.Any()).Return(supportSpaces, nil).AnyTimes()
 	mockNetworkEnviron.EXPECT().SupportsProviderSpaces(gomock.Any()).Return(isProviderSpaces, nil).AnyTimes()
 	mockProvider := environmocks.NewMockCloudEnvironProvider(ctrl)
-	mockProvider.EXPECT().Open(gomock.Any()).Return(mockNetworkEnviron, nil)
+	mockProvider.EXPECT().Open(gomock.Any()).Return(mockNetworkEnviron, nil).AnyTimes()
 
 	unreg := environs.RegisterProvider("mock-provider", mockProvider)
 
@@ -547,7 +547,7 @@ func (s *SpaceTestMockSuite) setupSpacesAPI(c *gc.C, supportSpaces bool, isProvi
 		StorageEndpoint:  "storage-endpoint",
 	}
 
-	s.mockBacking.EXPECT().CloudSpec().Return(cloudspec, nil)
+	s.mockBacking.EXPECT().CloudSpec().Return(cloudspec, nil).AnyTimes()
 
 	var err error
 	s.api, err = spaces.NewAPIWithBacking(s.mockBacking, s.mockBlockChecker, s.mockCloudCallContext, s.mockResource, s.mockAuthorizer, s.mockOpFactory)
@@ -631,7 +631,7 @@ func (sb *stubBacking) IsController() bool {
 	panic("should not be called")
 }
 
-func (sb *stubBacking) ConstraintsBySpaceName(name string) ([]spaces.Constraints, error) {
+func (sb *stubBacking) ConstraintsBySpaceName(_ string) ([]spaces.Constraints, error) {
 	panic("should not be called")
 }
 
@@ -643,7 +643,7 @@ func (sb *stubBacking) ControllerConfig() (controller.Config, error) {
 	panic("should not be called")
 }
 
-func (sb *stubBacking) SpaceByName(name string) (networkingcommon.BackingSpace, error) {
+func (sb *stubBacking) SpaceByName(_ string) (networkingcommon.BackingSpace, error) {
 	panic("should not be called")
 }
 
@@ -652,6 +652,14 @@ func (sb *stubBacking) AllEndpointBindings() ([]spaces.ApplicationEndpointBindin
 }
 
 func (sb *stubBacking) AllMachines() ([]spaces.Machine, error) {
+	panic("should not be called")
+}
+
+func (sb *stubBacking) AllConstraints() ([]spaces.Constraints, error) {
+	panic("should not be called")
+}
+
+func (sb *stubBacking) MovingSubnet(string) (spaces.MovingSubnet, error) {
 	panic("should not be called")
 }
 
@@ -1176,7 +1184,7 @@ func (s *SpacesSuite) TestSuppportsSpacesEnvironNewError(c *gc.C) {
 	c.Assert(err, gc.ErrorMatches, "getting environ: boom")
 }
 
-func (s *SpacesSuite) TestSuppportsSpacesWithoutNetworking(c *gc.C) {
+func (s *SpacesSuite) TestSupportsSpacesWithoutNetworking(c *gc.C) {
 	apiservertesting.BackingInstance.SetUp(
 		c,
 		apiservertesting.StubEnvironName,
@@ -1188,7 +1196,7 @@ func (s *SpacesSuite) TestSuppportsSpacesWithoutNetworking(c *gc.C) {
 	c.Assert(err, jc.Satisfies, errors.IsNotSupported)
 }
 
-func (s *SpacesSuite) TestSuppportsSpacesWithoutSpaces(c *gc.C) {
+func (s *SpacesSuite) TestSupportsSpacesWithoutSpaces(c *gc.C) {
 	apiservertesting.BackingInstance.SetUp(
 		c,
 		apiservertesting.StubNetworkingEnvironName,
@@ -1207,7 +1215,7 @@ func (s *SpacesSuite) TestSuppportsSpacesWithoutSpaces(c *gc.C) {
 	c.Assert(err, jc.Satisfies, errors.IsNotSupported)
 }
 
-func (s *SpacesSuite) TestSuppportsSpaces(c *gc.C) {
+func (s *SpacesSuite) TestSupportsSpaces(c *gc.C) {
 	err := spaces.SupportsSpaces(&stubBacking{apiservertesting.BackingInstance}, context.NewCloudCallContext())
 	c.Assert(err, jc.ErrorIsNil)
 }

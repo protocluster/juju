@@ -42,17 +42,50 @@ const (
 	runOnRemote
 )
 
+// HookHandlerType is used to indicate the type of script used for handling a
+// particular hook type.
+type HookHandlerType string
+
+// String implements fmt.Stringer for HookHandlerType.
+func (t HookHandlerType) String() string {
+	switch t {
+	case ExplicitHookHandler:
+		return "explicit, bespoke hook script"
+	case DispatchingHookHandler:
+		return "hook dispatching script: " + hookDispatcherScript
+	default:
+		return "unknown/invalid hook handler"
+	}
+}
+
+const (
+	InvalidHookHandler = HookHandlerType("invalid")
+
+	// ExplicitHookHandler indicates that a bespoke, per-hook script was
+	// used for handling a particular hook.
+	ExplicitHookHandler = HookHandlerType("explicit")
+
+	// DispatchingHookHandler indicates the use of a specialized script that
+	// acts as a dispatcher for all types of hooks. This functionality has
+	// been introduced with the operator framework changes.
+	DispatchingHookHandler = HookHandlerType("dispatch")
+
+	hookDispatcherScript = "dispatch"
+)
+
 // Runner is responsible for invoking commands in a context.
 type Runner interface {
 
 	// Context returns the context against which the runner executes.
 	Context() Context
 
-	// RunHook executes the hook with the supplied name.
-	RunHook(name string) error
+	// RunHook executes the hook with the supplied name and returns back
+	// the type of script handling hook that was used or whether any errors
+	// occurred.
+	RunHook(name string) (HookHandlerType, error)
 
 	// RunAction executes the action with the supplied name.
-	RunAction(name string) error
+	RunAction(name string) (HookHandlerType, error)
 
 	// RunCommands executes the supplied script.
 	RunCommands(commands string) (*utilexec.ExecResponse, error)
@@ -279,52 +312,43 @@ func (runner *runner) updateActionResults(results *utilexec.ExecResponse) error 
 }
 
 // RunAction exists to satisfy the Runner interface.
-func (runner *runner) RunAction(actionName string) error {
+func (runner *runner) RunAction(actionName string) (HookHandlerType, error) {
 	if _, err := runner.context.ActionData(); err != nil {
-		return errors.Trace(err)
+		return InvalidHookHandler, errors.Trace(err)
 	}
 	if actionName == actions.JujuRunActionName {
-		return runner.runJujuRunAction()
+		return InvalidHookHandler, runner.runJujuRunAction()
 	}
 	rMode := runOnLocal
 	if runner.context.ModelType() == model.CAAS {
 		// run actions on remote workload pod if it's caas model.
 		rMode = runOnRemote
 	}
-	return runner.runCharmHookWithLocation(actionName, runner.getFunctionDir(), rMode)
-}
-
-func (runner *runner) getFunctionDir() string {
-	charmDir := runner.paths.GetCharmDir()
-	dir := filepath.Join(charmDir, "functions")
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		return "functions"
-	}
-	return "actions"
+	return runner.runCharmHookWithLocation(actionName, "actions", rMode)
 }
 
 // RunHook exists to satisfy the Runner interface.
-func (runner *runner) RunHook(hookName string) error {
+func (runner *runner) RunHook(hookName string) (HookHandlerType, error) {
 	return runner.runCharmHookWithLocation(hookName, "hooks", runOnLocal)
 }
 
-func (runner *runner) runCharmHookWithLocation(hookName, charmLocation string, rMode runMode) (err error) {
+func (runner *runner) runCharmHookWithLocation(hookName, charmLocation string, rMode runMode) (hookHandlerType HookHandlerType, err error) {
 	token := ""
 	if rMode == runOnRemote {
 		token, err = utils.RandomPassword()
 		if err != nil {
-			return errors.Trace(err)
+			return InvalidHookHandler, errors.Trace(err)
 		}
 	}
 	srv, err := runner.startJujucServer(token, rMode)
 	if err != nil {
-		return err
+		return InvalidHookHandler, errors.Trace(err)
 	}
 	defer srv.Close()
 
 	env, err := runner.context.HookVars(runner.paths, rMode == runOnRemote)
 	if err != nil {
-		return errors.Trace(err)
+		return InvalidHookHandler, errors.Trace(err)
 	}
 	if jujuos.HostOS() == jujuos.Windows {
 		// TODO(fwereade): somehow consolidate with utils/exec?
@@ -335,6 +359,7 @@ func (runner *runner) runCharmHookWithLocation(hookName, charmLocation string, r
 	if rMode == runOnRemote {
 		env = append(env, "JUJU_AGENT_TOKEN="+token)
 	}
+	env = append(env, "JUJU_DISPATCH_PATH="+charmLocation+"/"+hookName)
 
 	defer func() {
 		err = runner.context.Flush(hookName, err)
@@ -342,13 +367,21 @@ func (runner *runner) runCharmHookWithLocation(hookName, charmLocation string, r
 
 	debugctx := debug.NewHooksContext(runner.context.UnitName())
 	if session, _ := debugctx.FindSession(); session != nil && session.MatchHook(hookName) {
-		logger.Infof("executing %s via debug-hooks", hookName)
-		return session.RunHook(hookName, runner.paths.GetCharmDir(), env)
+		// Note: hookScript might be relative but the debug session only requires its name
+		hookHandlerType, hookScript, _ := runner.discoverHookHandler(hookName, runner.paths.GetCharmDir(), charmLocation)
+		logger.Infof("executing %s via debug-hooks; %s", hookName, hookHandlerType)
+		return hookHandlerType, session.RunHook(hookName, runner.paths.GetCharmDir(), env, filepath.Base(hookScript))
+	}
+
+	charmDir := runner.paths.GetCharmDir()
+	hookHandlerType, hookScript, err := runner.discoverHookHandler(hookName, charmDir, charmLocation)
+	if err != nil {
+		return InvalidHookHandler, err
 	}
 	if rMode == runOnRemote {
-		return runner.runCharmProcessOnRemote(hookName, env, charmLocation)
+		return hookHandlerType, runner.runCharmProcessOnRemote(hookScript, hookName, charmDir, env)
 	}
-	return runner.runCharmProcessOnLocal(hookName, env, charmLocation)
+	return hookHandlerType, runner.runCharmProcessOnLocal(hookScript, hookName, charmDir, env)
 }
 
 // loggerAdaptor implements MessageReceiver and
@@ -392,16 +425,13 @@ func (b *bufferAdaptor) Messagef(isPrefix bool, message string, args ...interfac
 	b.outCopy.WriteString(formattedMessage)
 }
 
-func (runner *runner) runCharmProcessOnRemote(hookName string, env []string, charmLocation string) error {
-	charmDir := runner.paths.GetCharmDir()
-	hook := filepath.Join(charmDir, filepath.Join(charmLocation, hookName))
-
+func (runner *runner) runCharmProcessOnRemote(hook, hookName, charmDir string, env []string) error {
 	var cancel <-chan struct{}
 	outReader, outWriter, err := os.Pipe()
 	if err != nil {
 		return errors.Errorf("cannot make stdout logging pipe: %v", err)
 	}
-	defer outWriter.Close()
+	defer func() { _ = outWriter.Close() }()
 
 	actionOut := &bufferAdaptor{ReadWriter: outWriter}
 	hookOutLogger := charmrunner.NewHookLogger(outReader,
@@ -424,7 +454,7 @@ func (runner *runner) runCharmProcessOnRemote(hookName string, env []string, cha
 		if err != nil {
 			return errors.Errorf("cannot make stderr logging pipe: %v", err)
 		}
-		defer errWriter.Close()
+		defer func() { _ = errWriter.Close() }()
 
 		actionErr = &bufferAdaptor{ReadWriter: errWriter}
 		hookErrLogger = charmrunner.NewHookLogger(errReader,
@@ -458,15 +488,11 @@ func (runner *runner) runCharmProcessOnRemote(hookName string, env []string, cha
 			return errors.Trace(err)
 		}
 	}
+
 	return errors.Trace(err)
 }
 
-func (runner *runner) runCharmProcessOnLocal(hookName string, env []string, charmLocation string) error {
-	charmDir := runner.paths.GetCharmDir()
-	hook, err := searchHook(charmDir, filepath.Join(charmLocation, hookName))
-	if err != nil {
-		return err
-	}
+func (runner *runner) runCharmProcessOnLocal(hook, hookName, charmDir string, env []string) error {
 	hookCmd := hookCommand(hook)
 	ps := exec.Command(hookCmd[0], hookCmd[1:]...)
 	ps.Env = env
@@ -475,7 +501,7 @@ func (runner *runner) runCharmProcessOnLocal(hookName string, env []string, char
 	if err != nil {
 		return errors.Errorf("cannot make logging pipe: %v", err)
 	}
-	defer outWriter.Close()
+	defer func() { _ = outWriter.Close() }()
 
 	ps.Stdout = outWriter
 	ps.Stderr = outWriter
@@ -501,7 +527,7 @@ func (runner *runner) runCharmProcessOnLocal(hookName string, env []string, char
 		if err != nil {
 			return errors.Errorf("cannot make stderr logging pipe: %v", err)
 		}
-		defer errWriter.Close()
+		defer func() { _ = errWriter.Close() }()
 
 		ps.Stderr = errWriter
 		errBuf := &bufferAdaptor{ReadWriter: errWriter}
@@ -535,6 +561,7 @@ func (runner *runner) runCharmProcessOnLocal(hookName string, env []string, char
 	} else {
 		exitErr = err
 	}
+
 	// Ensure hook loggers are stopped before reading stdout/stderr
 	// so all the output is captured.
 	hookOutLogger.Stop()
@@ -544,7 +571,7 @@ func (runner *runner) runCharmProcessOnLocal(hookName string, env []string, char
 	if runningAction {
 		readBytes := func(r io.Reader) []byte {
 			var o bytes.Buffer
-			o.ReadFrom(r)
+			_, _ = o.ReadFrom(r)
 			return o.Bytes()
 		}
 		exitCode := func(exitErr error) int {
@@ -569,7 +596,25 @@ func (runner *runner) runCharmProcessOnLocal(hookName string, env []string, char
 			return errors.Trace(err)
 		}
 	}
+
 	return errors.Trace(exitErr)
+}
+
+// discoverHookHandler checks to see if the dispatch script exists, if not,
+// check for the given hookName.  Based on what is discovered, return the
+// HookHandlerType and the actual script to be run.
+func (runner *runner) discoverHookHandler(hookName, charmDir, charmLocation string) (HookHandlerType, string, error) {
+	hook, err := discoverHookScript(charmDir, hookDispatcherScript)
+	if err == nil {
+		return DispatchingHookHandler, hook, nil
+	}
+	if !charmrunner.IsMissingHookError(err) {
+		return InvalidHookHandler, "", err
+	}
+	if hook, err = discoverHookScript(charmDir, filepath.Join(charmLocation, hookName)); err == nil {
+		return ExplicitHookHandler, hook, nil
+	}
+	return InvalidHookHandler, hook, err
 }
 
 func (runner *runner) startJujucServer(token string, rMode runMode) (*jujuc.Server, error) {
